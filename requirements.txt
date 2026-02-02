@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+docker
+sqlalchemy
+GitPython
+psutil
+gputil
