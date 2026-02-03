@@ -15,6 +15,8 @@ async def admin_page():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Mobile Portainer API Manager</title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
         <style>
             body { padding: 20px; background-color: #f8f9fa; }
             .container-fluid { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
@@ -34,6 +36,22 @@ async def admin_page():
                     <input type="password" id="admin-password" class="form-control" placeholder="Enter ADMIN_PASSWORD">
                 </div>
                 <button onclick="login()" class="btn btn-primary w-100">Login</button>
+            </div>
+        </div>
+
+        <!-- QR Code Modal -->
+        <div class="modal fade" id="qrModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">API Key QR Code</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body text-center">
+                        <div id="qrcode" class="d-flex justify-content-center"></div>
+                        <p class="mt-3 text-muted small" id="qr-content-preview"></p>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -220,7 +238,10 @@ async def admin_page():
                             <span class="text-muted ms-2">(${k.note || 'No note'})</span>
                             <div class="small text-muted">Created: ${new Date(k.created_at).toLocaleString()}</div>
                         </div>
-                        <button onclick="deleteKey('${k.key}')" class="btn btn-sm btn-danger">Delete</button>
+                        <div>
+                            <button onclick="showQR('${k.key}')" class="btn btn-sm btn-info me-2 text-white">QR Code</button>
+                            <button onclick="deleteKey('${k.key}')" class="btn btn-sm btn-danger">Delete</button>
+                        </div>
                     `;
                     list.appendChild(div);
                 });
@@ -280,6 +301,28 @@ async def admin_page():
                 localStorage.removeItem('admin_user');
                 localStorage.removeItem('admin_token');
                 location.reload();
+            }
+
+            function showQR(apiKey) {
+                const modal = new bootstrap.Modal(document.getElementById('qrModal'));
+                const qrContainer = document.getElementById('qrcode');
+                qrContainer.innerHTML = ''; // Clear previous
+                
+                const data = {
+                    apikey: apiKey,
+                    url: window.location.origin
+                };
+                
+                const jsonStr = JSON.stringify(data);
+                
+                new QRCode(qrContainer, {
+                    text: jsonStr,
+                    width: 256,
+                    height: 256
+                });
+                
+                // document.getElementById('qr-content-preview').innerText = jsonStr;
+                modal.show();
             }
         </script>
     </body>

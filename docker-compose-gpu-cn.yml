@@ -10,7 +10,7 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-password}
       - IGNORED_EVENTS=${IGNORED_EVENTS:-exec_create,exec_start,exec_die}
       - GIT_AUTO_UPDATE=true
-      - GIT_REPO_URL=https://github.com/CodeFuckee/mobile_portainer.git
+      - GIT_REPO_URL=https://githubfast.com/CodeFuckee/mobile_portainer.git
       - GIT_BRANCH=main
       - GIT_CHECK_INTERVAL=60
       - GIT_SSL_NO_VERIFY=true
