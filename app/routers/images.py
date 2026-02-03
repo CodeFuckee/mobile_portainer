@@ -88,3 +88,28 @@ async def pull_image(data: Dict[str, str]):
         raise HTTPException(status_code=500, detail=f"Error pulling image: {str(e)}")
     finally:
         client.close()
+
+@router.delete("/{image_id:path}")
+async def remove_image(image_id: str, force: bool = False):
+    """
+    Remove a Docker image.
+    path param 'image_id' can be a short ID, long ID, or image name (tag).
+    Use 'force=true' to force removal (e.g., if image is tagged in multiple repositories).
+    """
+    client = get_docker_client()
+    try:
+        # image_id might need to be decoded if it was URL encoded by the client,
+        # but FastAPI/Starlette usually handles decoding of path params automatically.
+        # However, if it contains slashes, we used :path converter.
+        
+        client.images.remove(image=image_id, force=force)
+        return {"status": "success", "message": f"Image {image_id} removed successfully"}
+    except docker.errors.ImageNotFound:
+        raise HTTPException(status_code=404, detail="Image not found")
+    except docker.errors.APIError as e:
+        error_msg = e.explanation if hasattr(e, 'explanation') else str(e)
+        raise HTTPException(status_code=500, detail=f"Failed to remove image: {error_msg}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error removing image: {str(e)}")
+    finally:
+        client.close()
