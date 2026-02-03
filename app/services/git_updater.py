@@ -63,15 +63,22 @@ def git_auto_updater():
         try:
             repo.git.fetch()
             # Reset hard to remote branch (Warning: Overwrites local files!)
-            repo.git.reset('--hard', f'origin/{GIT_BRANCH}')
+            try:
+                repo.git.reset('--hard', f'origin/{GIT_BRANCH}')
+            except git.GitCommandError as e:
+                if "untracked working tree files would be overwritten" in str(e) or "Please move or remove them" in str(e):
+                    logger.warning("Untracked files detected. Forcing checkout...")
+                    repo.git.checkout('-B', GIT_BRANCH, f'origin/{GIT_BRANCH}', force=True)
+                else:
+                    raise e
+            
             logger.info(f"Successfully initialized and synced with {GIT_BRANCH}")
             
             # Initial check for dependencies (optional, but good for first run)
             # subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
             
         except Exception as e:
-                # If reset fails, maybe we are already there or empty
-                pass
+                logger.error(f"Initial sync failed: {e}")
 
         while True:
             try:
@@ -97,7 +104,16 @@ def git_auto_updater():
                         logger.warning(f"Failed to check for requirements.txt changes: {e}")
 
                     # Pull changes
-                    repo.git.pull('origin', GIT_BRANCH)
+                    try:
+                        repo.git.pull('origin', GIT_BRANCH)
+                    except git.GitCommandError as e:
+                        if "untracked working tree files would be overwritten" in str(e) or "Please move or remove them" in str(e):
+                             logger.warning("Conflict detected during pull. Forcing checkout...")
+                             repo.git.fetch()
+                             repo.git.checkout('-B', GIT_BRANCH, f'origin/{GIT_BRANCH}', force=True)
+                        else:
+                             raise e
+                    
                     logger.info("Update successful. Server should reload if running with --reload.")
                     
                     # Install dependencies if needed

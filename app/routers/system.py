@@ -78,10 +78,34 @@ async def get_git_version():
     """
     repo_dir = os.getcwd()
     try:
-        repo = git.Repo(repo_dir)
-        head_commit = repo.head.commit
+        repo = git.Repo(repo_dir, search_parent_directories=True)
+        
+        try:
+            head_commit = repo.head.commit
+        except (ValueError, Exception):
+             return {
+                "branch": "unknown",
+                "commit_hash": "unknown",
+                "short_hash": "unknown",
+                "commit_message": "No commits or invalid repo",
+                "author": "unknown",
+                "date": datetime.now().isoformat()
+            }
+
+        branch_name = "detached"
+        try:
+            branch_name = repo.active_branch.name
+        except (TypeError, ValueError, Exception):
+            # Handle detached HEAD or missing refs (like 'master' not found)
+            try:
+                # Try to get symbolic reference name if available
+                if not repo.head.is_detached:
+                    branch_name = repo.head.ref.name
+            except:
+                pass
+
         return {
-            "branch": repo.active_branch.name,
+            "branch": branch_name,
             "commit_hash": head_commit.hexsha,
             "short_hash": head_commit.hexsha[:7],
             "commit_message": head_commit.message.strip(),
@@ -91,6 +115,9 @@ async def get_git_version():
     except git.exc.InvalidGitRepositoryError:
          raise HTTPException(status_code=404, detail="Not a git repository")
     except Exception as e:
+         # Log the error but return a graceful response instead of 500 if possible, 
+         # or just raise 500 if it's a critical failure.
+         # Given the user's issue, catching the specific error inside is better.
          raise HTTPException(status_code=500, detail=f"Error retrieving git info: {str(e)}")
 
 @router.get("/usage")
