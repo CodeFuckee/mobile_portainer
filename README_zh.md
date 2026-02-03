@@ -41,11 +41,51 @@
 
 ### 2. 安装与运行
 
+#### 方式 A: 源码构建 (Docker Compose)
+
 直接使用 Docker Compose 启动服务：
 
 ```bash
 # 构建并后台启动
 docker-compose up -d --build
+```
+
+#### 方式 B: 使用 Docker 镜像
+
+你也可以直接拉取构建好的镜像运行：
+
+**Docker CLI:**
+
+```bash
+docker run -d \
+  --name mobile-portainer \
+  -p 8000:8000 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v mobile_portainer_data:/app/data \
+  -v /:/hostfs:ro \
+  -e ADMIN_USER=admin \
+  -e ADMIN_PASSWORD=password \
+  --restart unless-stopped \
+  codefuckee/mobile_portainer:latest
+```
+
+**Docker Compose:**
+
+```yaml
+version: '3.8'
+services:
+  api:
+    image: codefuckee/mobile_portainer:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - ADMIN_USER=admin
+      - ADMIN_PASSWORD=password
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/app/data
+      - /:/hostfs:ro
+    restart: unless-stopped
 ```
 
 ### 3. 访问服务
