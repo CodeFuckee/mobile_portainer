@@ -49,6 +49,28 @@ async def list_volumes():
     finally:
         client.close()
 
+@router.delete("/{volume_id}", response_model=Dict[str, Any])
+async def delete_volume(volume_id: str, force: bool = False):
+    """
+    Delete a specific Docker volume.
+    """
+    client = get_docker_client()
+    try:
+        volume = client.volumes.get(volume_id)
+        volume.remove(force=force)
+        return {"status": "success", "message": f"Volume {volume_id} deleted successfully"}
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Volume not found")
+    except docker.errors.APIError as e:
+        if "volume is in use" in str(e).lower():
+             raise HTTPException(status_code=409, detail=f"Volume is in use: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Docker API Error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting volume: {str(e)}")
+    finally:
+        client.close()
+
+
 @router.get("/{volume_id}", response_model=Dict[str, Any])
 async def get_volume_details(volume_id: str):
     """
