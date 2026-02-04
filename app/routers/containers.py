@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse
 from typing import List, Dict, Any, Optional, Union
 import docker
 import shlex
@@ -156,6 +157,84 @@ async def list_containers():
         raise HTTPException(status_code=500, detail=f"Error retrieving containers: {str(e)}")
     finally:
         client.close()
+
+@router.get("/{container_id}/download")
+async def download_container_file(container_id: str, path: str):
+    """
+    Download a file from the container.
+    If the file is mounted, it downloads directly from the host.
+    If not mounted, it downloads as a tar archive.
+    """
+    if not path or not path.startswith("/"):
+         raise HTTPException(status_code=400, detail="Path must be absolute (e.g., /data/config.json)")
+
+    client = get_docker_client()
+    try:
+        container = client.containers.get(container_id)
+        mounts = container.attrs.get("Mounts", [])
+        
+        # Find the best matching mount (longest prefix)
+        path_clean = path.rstrip("/")
+        best_match = None
+        
+        for mount in mounts:
+            dest = mount.get("Destination")
+            if not dest:
+                continue
+            
+            dest_clean = dest.rstrip("/")
+            
+            if path_clean == dest_clean or path_clean.startswith(dest_clean + "/"):
+                if best_match is None or len(dest_clean) > len(best_match.get("Destination").rstrip("/")):
+                    best_match = mount
+        
+        if best_match:
+            mount_source = best_match.get("Source")
+            mount_dest = best_match.get("Destination")
+            mount_dest_clean = mount_dest.rstrip("/")
+            
+            if path_clean == mount_dest_clean:
+                relative_path = ""
+                host_abs_path = mount_source
+            else:
+                relative_path = path_clean[len(mount_dest_clean):].lstrip("/")
+                host_abs_path = os.path.join(mount_source, relative_path)
+            
+            clean_host_abs_path = host_abs_path.lstrip("/")
+            final_path = os.path.join(HOST_FILESYSTEM_ROOT, clean_host_abs_path)
+            
+            # Security checks
+            if ".." in relative_path.split("/"):
+                 raise HTTPException(status_code=403, detail="Path traversal detected")
+                 
+            if os.path.exists(final_path):
+                if os.path.isdir(final_path):
+                     raise HTTPException(status_code=400, detail="Cannot download directory directly. Please specify a file.")
+                return FileResponse(final_path, filename=os.path.basename(path))
+        
+        # Fallback for non-mounted files: use get_archive
+        try:
+            stream, stat = container.get_archive(path)
+            # stat contains: name, size, mode, mtime, linkname, uname, gname, uis, gid
+            return StreamingResponse(
+                stream, 
+                media_type="application/x-tar",
+                headers={"Content-Disposition": f'attachment; filename="{os.path.basename(path)}.tar"'}
+            )
+        except docker.errors.NotFound:
+             raise HTTPException(status_code=404, detail="File not found inside container")
+        except Exception as e:
+             raise HTTPException(status_code=500, detail=f"Error retrieving file from container: {str(e)}")
+
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Container not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+    finally:
+        client.close()
+
 
 @router.get("/summary", response_model=List[Dict[str, Any]])
 async def list_containers_summary():

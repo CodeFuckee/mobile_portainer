@@ -10,7 +10,7 @@ A lightweight Docker management API service built with [FastAPI](https://fastapi
 ## ✨ Features
 
 - **Docker Management**:
-  - **Containers**: List, inspect details, view logs, resource stats, start, stop, restart, kill, remove, **browse files**.
+  - **Containers**: List, inspect details, view logs, resource stats, start, stop, restart, kill, remove, **browse files**, **download files**.
   - **Images**: List, pull new images, remove, inspect details.
   - **Networks**: List, inspect details, create, remove.
   - **Volumes**: List, inspect details, create, remove, **browse files**.
