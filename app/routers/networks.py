@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict, Any
+import docker
 from app.core.security import get_api_key
 from app.core.utils import get_docker_client
 
@@ -29,5 +30,21 @@ async def list_networks():
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving networks: {str(e)}")
+    finally:
+        client.close()
+
+@router.get("/{network_id}", response_model=Dict[str, Any])
+async def get_network_details(network_id: str):
+    """
+    Get detailed information about a specific Docker network.
+    """
+    client = get_docker_client()
+    try:
+        network = client.networks.get(network_id)
+        return network.attrs
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Network not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving network details: {str(e)}")
     finally:
         client.close()
