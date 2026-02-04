@@ -188,8 +188,6 @@ async def run_container(request: DockerRunRequest):
         # It will try to pull image if missing usually, but explicit pull is safer/clearer?
         # client.containers.run docs say it pulls if missing.
         
-        container = client.containers.run(**params)
-        
         # If detach=False (default is False in our parser if -d not present), run() waits for command to finish and returns logs (bytes)
         # But for API, we probably always want to return container info, so maybe force detach=True if not specified?
         # Or if user didn't specify -d, run() returns logs. 
@@ -795,7 +793,7 @@ async def unpause_container(container_id: str):
         client.close()
 
 @router.delete("/{container_id}")
-async def delete_container(container_id: str, force: bool = False, v: bool = False):
+async def delete_container(container_id: str, force: bool = True, v: bool = False):
     """
     Remove a specific Docker container by its ID or Name.
     Query parameters:
