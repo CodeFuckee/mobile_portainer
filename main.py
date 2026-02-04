@@ -7,7 +7,7 @@ from app.services.docker_monitor import docker_event_listener
 from app.services.git_updater import git_auto_updater
 
 # Import Routers
-from app.routers import containers, images, networks, volumes, system, admin, websockets, web_ui
+from app.routers import containers, images, networks, volumes, system, admin, websockets, web_ui, stacks
 
 # Initialize Database
 Base.metadata.create_all(bind=engine)
@@ -33,6 +33,7 @@ app.include_router(containers.router)
 app.include_router(images.router)
 app.include_router(networks.router)
 app.include_router(volumes.router)
+app.include_router(stacks.router)
 app.include_router(system.router)
 app.include_router(admin.router)
 app.include_router(websockets.router)
