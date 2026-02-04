@@ -4,6 +4,9 @@
 
 这是一个基于 [FastAPI](https://fastapi.tiangolo.com/) 构建的轻量级 Docker 管理 API 服务。它旨在为移动端应用提供简洁的 Docker 容器、镜像、网络和卷的管理接口，同时也包含了一个简单的 Web 管理界面用于管理 API 密钥和集群节点。
 
+> **📱 配套客户端**: 本项目专为 Mobile Portainer 移动端应用设计。  
+> 👉 **获取客户端**: [https://github.com/CodeFuckee/mobile_portainer_flutter](https://github.com/CodeFuckee/mobile_portainer_flutter)
+
 ## ✨ 主要功能
 
 - **Docker 管理**:

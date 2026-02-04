@@ -60,18 +60,17 @@ async def get_volume_details(volume_id: str):
         
         # Check if volume is in use
         containers = client.containers.list(all=True)
-        in_use = False
+        used_by = []
         for c in containers:
             mounts = c.attrs.get("Mounts", [])
             for m in mounts:
                 if m.get("Type") == "volume" and m.get("Name") == volume.name:
-                    in_use = True
+                    used_by.append(c.name)
                     break
-            if in_use:
-                break
         
         data = dict(volume.attrs)
-        data["in_use"] = in_use
+        data["in_use"] = len(used_by) > 0
+        data["used_by_containers"] = used_by
         return data
     except docker.errors.NotFound:
         raise HTTPException(status_code=404, detail="Volume not found")

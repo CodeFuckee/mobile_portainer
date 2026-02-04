@@ -4,6 +4,9 @@
 
 A lightweight Docker management API service built with [FastAPI](https://fastapi.tiangolo.com/). It is designed to provide a simple interface for mobile applications to manage Docker containers, images, networks, and volumes. It also includes a simple Web Admin UI for managing API keys and cluster nodes.
 
+> **📱 Companion App**: This API is designed to work with the Mobile Portainer Flutter App.  
+> 👉 **Get the App**: [https://github.com/CodeFuckee/mobile_portainer_flutter](https://github.com/CodeFuckee/mobile_portainer_flutter)
+
 ## ✨ Features
 
 - **Docker Management**:
