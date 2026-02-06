@@ -21,6 +21,67 @@ router = APIRouter(
     dependencies=[Depends(get_api_key)]
 )
 
+@router.get("/info")
+async def get_system_info():
+    """
+    Get aggregated system information including Docker stats, Git version, and System resources.
+    """
+    try:
+        # 1. Docker Stats
+        docker_stats = {}
+        try:
+            client = get_docker_client()
+            try:
+                containers = client.containers.list(all=True)
+                images = client.images.list()
+                
+                total_containers = len(containers)
+                running_containers = sum(1 for c in containers if c.status == 'running')
+                stopped_containers = total_containers - running_containers
+                image_count = len(images)
+                
+                docker_stats = {
+                    "containers": {
+                        "total": total_containers,
+                        "running": running_containers,
+                        "stopped": stopped_containers
+                    },
+                    "images": image_count
+                }
+            finally:
+                client.close()
+        except Exception as e:
+            docker_stats = {"error": str(e)}
+
+        # 2. Git Version (Reuse existing logic by calling the function directly)
+        # Note: Since get_git_version is an async endpoint function, we can await it.
+        # However, it might return HTTPException which we should catch if we want partial results.
+        git_info = {}
+        try:
+            git_info = await get_git_version()
+        except HTTPException as e:
+            git_info = {"error": e.detail}
+        except Exception as e:
+            git_info = {"error": str(e)}
+
+        # 3. System Usage (Reuse existing logic)
+        usage_info = {}
+        try:
+            usage_info = await get_system_usage()
+        except HTTPException as e:
+            usage_info = {"error": e.detail}
+        except Exception as e:
+            usage_info = {"error": str(e)}
+
+        return {
+            "docker": docker_stats,
+            "git": git_info,
+            "system": usage_info
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving system info: {str(e)}")
+
 @router.get("/self", response_model=Dict[str, Any])
 async def get_self_container_info():
     """
