@@ -214,6 +214,28 @@ async def get_system_usage():
 
 def _get_host_used_ports():
     used_ports = set()
+    
+    # Method 0: Check Docker mapped ports (Most reliable for containerized environment)
+    try:
+        client = get_docker_client()
+        containers = client.containers.list(all=True)
+        for c in containers:
+            # ports format: {'80/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '8000'}], ...}
+            ports = c.attrs.get('NetworkSettings', {}).get('Ports', {})
+            if ports:
+                for container_port, host_bindings in ports.items():
+                    if host_bindings:
+                        for binding in host_bindings:
+                            host_port = binding.get('HostPort')
+                            if host_port:
+                                try:
+                                    used_ports.add(int(host_port))
+                                except ValueError:
+                                    pass
+        client.close()
+    except Exception:
+        pass
+
     host_fs = os.getenv("HOST_FILESYSTEM_ROOT", "/")
     proc_net = os.path.join(host_fs, "proc/net")
     
@@ -254,17 +276,19 @@ def _get_host_used_ports():
                                 pass
             except Exception:
                 pass
-    else:
-        # Method 2: Fallback to psutil (Windows or Linux without host mount)
-        try:
-            conns = psutil.net_connections(kind='inet')
-            for c in conns:
-                # TCP LISTEN or UDP (any)
-                if c.status == 'LISTEN' or c.type == socket.SOCK_DGRAM:
-                    if c.laddr:
-                        used_ports.add(c.laddr.port)
-        except Exception:
-            pass
+    
+    # Method 2: Fallback to psutil (Windows or Linux without host mount)
+    # Even with Method 1, psutil might catch some local processes if running outside container
+    # or in host networking mode
+    try:
+        conns = psutil.net_connections(kind='inet')
+        for c in conns:
+            # TCP LISTEN or UDP (any)
+            if c.status == 'LISTEN' or c.type == socket.SOCK_DGRAM:
+                if c.laddr:
+                    used_ports.add(c.laddr.port)
+    except Exception:
+        pass
             
     return used_ports
 
