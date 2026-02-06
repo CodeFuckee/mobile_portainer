@@ -66,24 +66,46 @@ def git_auto_updater():
             logger.info("Current directory is not a git repository. Initializing...")
             repo = git.Repo.init(repo_dir)
             
-            # Create an empty initial commit to ensure HEAD is valid
-            # This fixes "fatal: ambiguous argument 'HEAD'" errors before first pull
-            try:
-                # We need to configure user/email for commit to work
-                with repo.config_writer() as writer:
-                    writer.set_value("user", "name", "Mobile Portainer")
-                    writer.set_value("user", "email", "admin@localhost")
-                
-                # Commit with allow-empty if possible, or just commit empty index
-                # git-python doesn't easily support --allow-empty via index.commit, 
-                # so we use raw command
-                repo.git.commit('--allow-empty', '-m', 'Initial commit')
-            except Exception as e:
-                logger.warning(f"Failed to create initial commit: {e}")
-
             # Create remote with primary URL initially
             final_repo_url = _construct_auth_url(GIT_REPO_URL)
             repo.create_remote('origin', final_repo_url)
+            
+            # Immediately try to sync to avoid "ambiguous HEAD" state
+            try:
+                logger.info("Performing initial sync...")
+                # Try fetching from configured URLs
+                base_urls = _get_mirror_urls(GIT_REPO_URL)
+                fetched = False
+                
+                for base_url in base_urls:
+                    try:
+                        url = _construct_auth_url(base_url)
+                        repo.remotes.origin.set_url(url)
+                        repo.git.fetch('origin')
+                        fetched = True
+                        break
+                    except Exception:
+                        continue
+                
+                if fetched:
+                    # Reset hard to remote branch
+                    repo.git.reset('--hard', f'origin/{GIT_BRANCH}')
+                    # Set upstream tracking so 'git pull' works manually
+                    try:
+                        repo.git.branch('--set-upstream-to', f'origin/{GIT_BRANCH}', GIT_BRANCH)
+                    except Exception:
+                        # If branch doesn't exist locally yet (it should after reset), create it
+                        try:
+                            repo.git.checkout('-b', GIT_BRANCH, f'origin/{GIT_BRANCH}')
+                        except Exception:
+                            pass
+                            
+                    logger.info("Initial sync successful. Repository is now consistent with remote.")
+                else:
+                    logger.warning("Initial sync failed. Repository is empty.")
+                    
+            except Exception as e:
+                logger.error(f"Error during initial sync: {e}")
             
         # Configure SSL Verify
         if GIT_SSL_NO_VERIFY:
