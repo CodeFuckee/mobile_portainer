@@ -8,6 +8,7 @@ from app.core.security import get_api_key
 from app.core.utils import get_docker_client, get_current_container_id
 import psutil
 import asyncio
+import socket
 
 # Try importing GPUtil
 try:
@@ -210,3 +211,88 @@ async def get_system_usage():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving system usage: {str(e)}")
+
+def _get_host_used_ports():
+    used_ports = set()
+    host_fs = os.getenv("HOST_FILESYSTEM_ROOT", "/")
+    proc_net = os.path.join(host_fs, "proc/net")
+    
+    # Method 1: Try reading /proc/net (Linux with host mount)
+    if os.path.exists(os.path.join(proc_net, "tcp")):
+        files = [
+            ("tcp", True),
+            ("tcp6", True),
+            ("udp", False),
+            ("udp6", False)
+        ]
+        
+        for fname, is_tcp in files:
+            path = os.path.join(proc_net, fname)
+            if not os.path.exists(path):
+                continue
+            
+            try:
+                with open(path, "r") as f:
+                    lines = f.readlines()[1:] # Skip header
+                    for line in lines:
+                        parts = line.split()
+                        if len(parts) < 4: continue
+                        
+                        local_addr = parts[1]
+                        status = parts[3]
+                        
+                        if ":" in local_addr:
+                            _, port_hex = local_addr.split(":")
+                            try:
+                                port = int(port_hex, 16)
+                                if is_tcp:
+                                    if status == "0A": # LISTEN
+                                        used_ports.add(port)
+                                else:
+                                    used_ports.add(port) # UDP
+                            except ValueError:
+                                pass
+            except Exception:
+                pass
+    else:
+        # Method 2: Fallback to psutil (Windows or Linux without host mount)
+        try:
+            conns = psutil.net_connections(kind='inet')
+            for c in conns:
+                # TCP LISTEN or UDP (any)
+                if c.status == 'LISTEN' or c.type == socket.SOCK_DGRAM:
+                    if c.laddr:
+                        used_ports.add(c.laddr.port)
+        except Exception:
+            pass
+            
+    return used_ports
+
+@router.get("/ports/available")
+async def get_available_ports():
+    """
+    Get a list of available port ranges on the host.
+    """
+    try:
+        used_ports = await asyncio.get_event_loop().run_in_executor(None, _get_host_used_ports)
+        
+        # Calculate available ranges
+        sorted_used = sorted(list(used_ports))
+        ranges = []
+        start = 1
+        
+        for port in sorted_used:
+            if port > start:
+                ranges.append(f"{start}-{port-1}")
+            start = port + 1
+            
+        if start <= 65535:
+            ranges.append(f"{start}-65535")
+            
+        return {
+            "total_available": 65535 - len(used_ports),
+            "ranges": ranges
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving available ports: {str(e)}")
+
