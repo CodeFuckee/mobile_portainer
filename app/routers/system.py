@@ -140,31 +140,42 @@ async def get_git_version():
     """
     repo_dir = os.getcwd()
     try:
-        repo = git.Repo(repo_dir, search_parent_directories=True)
+        # Prevent git from looking up parent directories which might be the host repo
+        # We want to know about the code inside the container/app
+        repo = git.Repo(repo_dir, search_parent_directories=False)
         
         try:
             head_commit = repo.head.commit
         except (ValueError, Exception):
-             return {
-                "branch": "unknown",
-                "commit_hash": "unknown",
-                "short_hash": "unknown",
-                "commit_message": "No commits or invalid repo",
-                "author": "unknown",
-                "date": datetime.now().isoformat()
-            }
+             # Try fallback to just getting the sha if commit object fails
+             # (Sometimes happens in shallow clones or weird states)
+             try:
+                 sha = repo.head.object.hexsha
+                 return {
+                    "branch": "unknown",
+                    "commit_hash": sha,
+                    "short_hash": sha[:7],
+                    "commit_message": "Commit message unavailable",
+                    "author": "unknown",
+                    "date": datetime.now().isoformat()
+                 }
+             except:
+                 return {
+                    "branch": "unknown",
+                    "commit_hash": "unknown",
+                    "short_hash": "unknown",
+                    "commit_message": "No commits or invalid repo",
+                    "author": "unknown",
+                    "date": datetime.now().isoformat()
+                }
 
         branch_name = "detached"
         try:
-            branch_name = repo.active_branch.name
+            if not repo.head.is_detached:
+                 branch_name = repo.active_branch.name
         except (TypeError, ValueError, Exception):
-            # Handle detached HEAD or missing refs (like 'master' not found)
-            try:
-                # Try to get symbolic reference name if available
-                if not repo.head.is_detached:
-                    branch_name = repo.head.ref.name
-            except:
-                pass
+            # Fallback checks
+            pass
 
         return {
             "branch": branch_name,
@@ -175,12 +186,27 @@ async def get_git_version():
             "date": datetime.fromtimestamp(head_commit.committed_date).isoformat()
         }
     except git.exc.InvalidGitRepositoryError:
-         raise HTTPException(status_code=404, detail="Not a git repository")
+         # Not a git repo, return empty structure instead of 404/500 to keep UI happy
+         return {
+            "branch": "unknown",
+            "commit_hash": "unknown",
+            "short_hash": "unknown",
+            "commit_message": "Not a git repository",
+            "author": "unknown",
+            "date": datetime.now().isoformat()
+        }
     except Exception as e:
          # Log the error but return a graceful response instead of 500 if possible, 
          # or just raise 500 if it's a critical failure.
          # Given the user's issue, catching the specific error inside is better.
-         raise HTTPException(status_code=500, detail=f"Error retrieving git info: {str(e)}")
+         return {
+            "branch": "error",
+            "commit_hash": "error",
+            "short_hash": "error",
+            "commit_message": str(e),
+            "author": "error",
+            "date": datetime.now().isoformat()
+        }
 
 @router.get("/usage")
 async def get_system_usage():
