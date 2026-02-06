@@ -54,6 +54,9 @@ def git_auto_updater():
         logger.info("Git auto update disabled or no repo URL provided.")
         return
 
+    # Disable interactive prompts
+    os.environ['GIT_TERMINAL_PROMPT'] = '0'
+
     logger.info(f"Starting Git auto updater (Repo: {GIT_REPO_URL}, Branch: {GIT_BRANCH})")
     
     repo_dir = os.getcwd()
@@ -139,11 +142,11 @@ def git_auto_updater():
                     logger.info(f"Successfully fetched from {base_url}")
                     break # Stop if successful
                 except Exception as e:
-                    logger.warning(f"Failed to fetch from {base_url}: {e}")
+                    logger.warning(f"Failed to fetch from {base_url}. Trying next mirror... Error: {e}")
                     continue
             
             if not fetch_success:
-                logger.error("Failed to fetch from all configured remotes.")
+                logger.error("Failed to fetch from all configured remotes. Please check your network connection.")
             else:
                 # 3. Check for updates and Reset
                 try:
