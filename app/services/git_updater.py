@@ -65,6 +65,22 @@ def git_auto_updater():
         except git.exc.InvalidGitRepositoryError:
             logger.info("Current directory is not a git repository. Initializing...")
             repo = git.Repo.init(repo_dir)
+            
+            # Create an empty initial commit to ensure HEAD is valid
+            # This fixes "fatal: ambiguous argument 'HEAD'" errors before first pull
+            try:
+                # We need to configure user/email for commit to work
+                with repo.config_writer() as writer:
+                    writer.set_value("user", "name", "Mobile Portainer")
+                    writer.set_value("user", "email", "admin@localhost")
+                
+                # Commit with allow-empty if possible, or just commit empty index
+                # git-python doesn't easily support --allow-empty via index.commit, 
+                # so we use raw command
+                repo.git.commit('--allow-empty', '-m', 'Initial commit')
+            except Exception as e:
+                logger.warning(f"Failed to create initial commit: {e}")
+
             # Create remote with primary URL initially
             final_repo_url = _construct_auth_url(GIT_REPO_URL)
             repo.create_remote('origin', final_repo_url)
