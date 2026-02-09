@@ -99,11 +99,11 @@ async def get_self_container_info():
         except docker.errors.NotFound:
             # Try finding by prefix if self_id is short ID
             if len(self_id) < 64:
-                 # List all and check prefix
-                 containers = client.containers.list(all=True)
-                 for c in containers:
-                     if c.id.startswith(self_id):
-                         return c.attrs
+                # List all and check prefix
+                containers = client.containers.list(all=True)
+                for c in containers:
+                    if c.id.startswith(self_id):
+                        return c.attrs
             
             raise HTTPException(status_code=404, detail=f"Self container not found (ID: {self_id})")
     except HTTPException:
@@ -147,32 +147,32 @@ async def get_git_version():
         try:
             head_commit = repo.head.commit
         except (ValueError, Exception):
-             # Try fallback to just getting the sha if commit object fails
-             # (Sometimes happens in shallow clones or weird states)
-             try:
-                 sha = repo.head.object.hexsha
-                 return {
-                    "branch": "unknown",
-                    "commit_hash": sha,
-                    "short_hash": sha[:7],
-                    "commit_message": "Commit message unavailable",
-                    "author": "unknown",
-                    "date": datetime.now().isoformat()
-                 }
-             except:
-                 return {
-                    "branch": "unknown",
-                    "commit_hash": "unknown",
-                    "short_hash": "unknown",
-                    "commit_message": "No commits or invalid repo",
-                    "author": "unknown",
-                    "date": datetime.now().isoformat()
+            # Try fallback to just getting the sha if commit object fails
+            # (Sometimes happens in shallow clones or weird states)
+            try:
+                sha = repo.head.object.hexsha
+                return {
+                "branch": "unknown",
+                "commit_hash": sha,
+                "short_hash": sha[:7],
+                "commit_message": "Commit message unavailable",
+                "author": "unknown",
+                "date": datetime.now().isoformat()
                 }
+            except:
+                return {
+                "branch": "unknown",
+                "commit_hash": "unknown",
+                "short_hash": "unknown",
+                "commit_message": "No commits or invalid repo",
+                "author": "unknown",
+                "date": datetime.now().isoformat()
+            }
 
         branch_name = "detached"
         try:
             if not repo.head.is_detached:
-                 branch_name = repo.active_branch.name
+                branch_name = repo.active_branch.name
         except (TypeError, ValueError, Exception):
             # Fallback checks
             pass
@@ -186,8 +186,8 @@ async def get_git_version():
             "date": datetime.fromtimestamp(head_commit.committed_date).isoformat()
         }
     except git.exc.InvalidGitRepositoryError:
-         # Not a git repo, return empty structure instead of 404/500 to keep UI happy
-         return {
+        # Not a git repo, return empty structure instead of 404/500 to keep UI happy
+        return {
             "branch": "unknown",
             "commit_hash": "unknown",
             "short_hash": "unknown",
@@ -196,10 +196,10 @@ async def get_git_version():
             "date": datetime.now().isoformat()
         }
     except Exception as e:
-         # Log the error but return a graceful response instead of 500 if possible, 
-         # or just raise 500 if it's a critical failure.
-         # Given the user's issue, catching the specific error inside is better.
-         return {
+        # Log the error but return a graceful response instead of 500 if possible, 
+        # or just raise 500 if it's a critical failure.
+        # Given the user's issue, catching the specific error inside is better.
+        return {
             "branch": "error",
             "commit_hash": "error",
             "short_hash": "error",
@@ -235,8 +235,8 @@ async def get_system_usage():
         try:
             # If HOST_FILESYSTEM_ROOT is set and not '/', prioritize it
             if host_fs != "/" and os.path.exists(host_fs):
-                 usage = psutil.disk_usage(host_fs)
-                 disks.append({
+                usage = psutil.disk_usage(host_fs)
+                disks.append({
                     "device": "host_root",
                     "mountpoint": host_fs,
                     "fstype": "unknown", # Hard to determine from inside without mount inspection
@@ -302,11 +302,45 @@ async def get_system_usage():
 def _get_host_used_ports():
     used_ports = set()
     
+    def _parse_proc_net_lines(lines, is_tcp):
+        for line in lines:
+            try:
+                parts = line.split()
+                if len(parts) < 4: continue
+                
+                local_addr = parts[1]
+                status = parts[3]
+                
+                if ":" in local_addr:
+                    _, port_hex = local_addr.split(":")
+                    port = int(port_hex, 16)
+                    if is_tcp:
+                        if status == "0A": # LISTEN
+                            used_ports.add(port)
+                    else:
+                        used_ports.add(port) # UDP
+            except Exception:
+                pass
+
+    host_network_container = None
+    
     # Method 0: Check Docker mapped ports (Most reliable for containerized environment)
     try:
         client = get_docker_client()
         containers = client.containers.list(all=True)
         for c in containers:
+            # Check for host network container (running) to use as proxy for host /proc/net
+            if not host_network_container and c.status == 'running':
+                # Check HostConfig.NetworkMode or NetworkSettings.Networks
+                is_host = c.attrs.get('HostConfig', {}).get('NetworkMode') == 'host'
+                if not is_host:
+                    networks = c.attrs.get('NetworkSettings', {}).get('Networks', {})
+                    if 'host' in networks:
+                        is_host = True
+                
+                if is_host:
+                    host_network_container = c
+
             # ports format: {'80/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '8000'}], ...}
             ports = c.attrs.get('NetworkSettings', {}).get('Ports', {})
             if ports:
@@ -319,6 +353,27 @@ def _get_host_used_ports():
                                     used_ports.add(int(host_port))
                                 except ValueError:
                                     pass
+        
+        # Method 0.5: Inspect /proc/net via host-networked container
+        if host_network_container:
+            files = [
+                ("tcp", True),
+                ("tcp6", True),
+                ("udp", False),
+                ("udp6", False)
+            ]
+            for fname, is_tcp in files:
+                try:
+                    # cat /proc/net/tcp
+                    exit_code, output = host_network_container.exec_run(f"cat /proc/net/{fname}")
+                    if exit_code == 0:
+                        lines = output.decode('utf-8').splitlines()
+                        if lines:
+                            # Skip header
+                            _parse_proc_net_lines(lines[1:], is_tcp)
+                except Exception:
+                    pass
+
         client.close()
     except Exception:
         pass
@@ -343,24 +398,7 @@ def _get_host_used_ports():
             try:
                 with open(path, "r") as f:
                     lines = f.readlines()[1:] # Skip header
-                    for line in lines:
-                        parts = line.split()
-                        if len(parts) < 4: continue
-                        
-                        local_addr = parts[1]
-                        status = parts[3]
-                        
-                        if ":" in local_addr:
-                            _, port_hex = local_addr.split(":")
-                            try:
-                                port = int(port_hex, 16)
-                                if is_tcp:
-                                    if status == "0A": # LISTEN
-                                        used_ports.add(port)
-                                else:
-                                    used_ports.add(port) # UDP
-                            except ValueError:
-                                pass
+                    _parse_proc_net_lines(lines, is_tcp)
             except Exception:
                 pass
     
