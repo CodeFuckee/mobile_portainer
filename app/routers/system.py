@@ -323,11 +323,28 @@ def _get_host_used_ports():
                 pass
 
     host_network_container = None
+    is_self_host = False
     
     # Method 0: Check Docker mapped ports (Most reliable for containerized environment)
     try:
         client = get_docker_client()
         containers = client.containers.list(all=True)
+        
+        # Check self container network mode
+        try:
+            from app.core.utils import get_self_container
+            self_container = get_self_container(client)
+            if self_container:
+                mode = self_container.attrs.get('HostConfig', {}).get('NetworkMode')
+                if mode == 'host':
+                    is_self_host = True
+                else:
+                    networks = self_container.attrs.get('NetworkSettings', {}).get('Networks', {})
+                    if 'host' in networks:
+                        is_self_host = True
+        except Exception:
+            pass
+
         for c in containers:
             # Check for host network container (running) to use as proxy for host /proc/net
             if not host_network_container and c.status == 'running':
@@ -415,6 +432,32 @@ def _get_host_used_ports():
     except Exception:
         pass
             
+    # Method 3: Socket Bind Check (If running in host network mode)
+    # This is a fallback to verify if ports are actually available by trying to bind them.
+    # Only applicable if the current container is running in host network mode.
+    if is_self_host:
+        for port in range(1, 65536):
+            if port in used_ports:
+                continue
+            
+            try:
+                # Use socket.bind to check if port is available
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                # Set SO_REUSEADDR to avoid false negatives from TIME_WAIT, 
+                # but we want to find actual conflicts.
+                # If a port is in TIME_WAIT, it might be technically usable with SO_REUSEADDR,
+                # but for safety we might want to consider it used if we can't bind without it?
+                # Actually, we want to know if we can start a NEW service on this port.
+                # If we use SO_REUSEADDR and succeed, it means we CAN start a service.
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(('0.0.0.0', port))
+                s.close()
+            except OSError:
+                # If bind fails, assume port is used (or permission denied)
+                used_ports.add(port)
+            except Exception:
+                pass
+
     return used_ports
 
 @router.get("/ports/available")

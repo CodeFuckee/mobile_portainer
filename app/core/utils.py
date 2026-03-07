@@ -9,6 +9,30 @@ def get_docker_client():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to connect to Docker daemon: {str(e)}")
 
+def get_self_container(client):
+    """
+    Get the container object for the current running process.
+    Returns None if not found or not running in a container.
+    """
+    self_id = get_current_container_id()
+    if not self_id:
+        return None
+        
+    try:
+        return client.containers.get(self_id)
+    except docker.errors.NotFound:
+        # Try finding by prefix if self_id is short ID
+        if len(self_id) < 64:
+            # List all and check prefix
+            containers = client.containers.list(all=True)
+            for c in containers:
+                if c.id.startswith(self_id):
+                    return c
+    except Exception:
+        pass
+        
+    return None
+
 def get_current_container_id():
     """
     Try to resolve the current container's ID.

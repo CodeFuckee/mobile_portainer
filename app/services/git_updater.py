@@ -54,10 +54,15 @@ def git_auto_updater():
         logger.info("Git auto update disabled or no repo URL provided.")
         return
 
+    # Clean up the URL (remove trailing dot if present)
+    repo_url = GIT_REPO_URL.strip()
+    if repo_url.endswith('.'):
+        repo_url = repo_url[:-1]
+
     # Disable interactive prompts
     os.environ['GIT_TERMINAL_PROMPT'] = '0'
 
-    logger.info(f"Starting Git auto updater (Repo: {GIT_REPO_URL}, Branch: {GIT_BRANCH})")
+    logger.info(f"Starting Git auto updater (Repo: {repo_url}, Branch: {GIT_BRANCH})")
     
     repo_dir = os.getcwd()
     
@@ -70,14 +75,14 @@ def git_auto_updater():
             repo = git.Repo.init(repo_dir)
             
             # Create remote with primary URL initially
-            final_repo_url = _construct_auth_url(GIT_REPO_URL)
+            final_repo_url = _construct_auth_url(repo_url)
             repo.create_remote('origin', final_repo_url)
             
             # Immediately try to sync to avoid "ambiguous HEAD" state
             try:
                 logger.info("Performing initial sync...")
                 # Try fetching from configured URLs
-                base_urls = _get_mirror_urls(GIT_REPO_URL)
+                base_urls = _get_mirror_urls(repo_url)
                 fetched = False
                 
                 for base_url in base_urls:
@@ -122,7 +127,7 @@ def git_auto_updater():
     while True:
         try:
             # 2. Try Fetching from available URLs
-            base_urls = _get_mirror_urls(GIT_REPO_URL)
+            base_urls = _get_mirror_urls(repo_url)
             fetch_success = False
             
             for base_url in base_urls:
@@ -142,7 +147,11 @@ def git_auto_updater():
                     logger.info(f"Successfully fetched from {base_url}")
                     break # Stop if successful
                 except Exception as e:
-                    logger.warning(f"Failed to fetch from {base_url}. Trying next mirror... Error: {e}")
+                    error_msg = str(e)
+                    if "terminal prompts disabled" in error_msg or "could not read Username" in error_msg:
+                        logger.warning(f"Failed to fetch from {base_url}. Repository not found or authentication required. Check GIT_REPO_URL/Token. Error: {e}")
+                    else:
+                        logger.warning(f"Failed to fetch from {base_url}. Trying next mirror... Error: {e}")
                     continue
             
             if not fetch_success:
