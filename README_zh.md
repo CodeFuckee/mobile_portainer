@@ -111,12 +111,6 @@ services:
 | `ADMIN_USER` | `admin` | Web 管理界面的登录用户名 |
 | `ADMIN_PASSWORD` | `...` | Web 管理界面的登录密码 |
 | `IGNORED_EVENTS` | `exec_create,exec_start,exec_die` | Docker 事件流中忽略的事件类型 |
-| `GIT_AUTO_UPDATE` | `true` | 是否开启 Git 自动更新功能 |
-| `GIT_REPO_URL` | `...` | 自动更新拉取的 Git 仓库地址 |
-| `GIT_BRANCH` | `main` | 跟踪的 Git 分支 |
-| `GIT_CHECK_INTERVAL` | `60` | 自动更新检查间隔（秒） |
-| `GIT_USER` | `...` | Git 仓库用户名 (如果需要) |
-| `GIT_PASSWORD` | `...` | Git 仓库密码 (如果需要) |
 | `HOST_FILESYSTEM_ROOT` | `/hostfs` | 宿主机根目录在容器内的挂载路径 |
 
 ## 📂 项目结构
@@ -127,7 +121,7 @@ services:
 │   ├── core/           # 核心配置、安全认证、工具函数
 │   ├── db/             # 数据库模型 (Models) 与连接 (Database)
 │   ├── routers/        # API 路由模块 (Containers, Images, WebUI 等)
-│   ├── services/       # 后台服务 (Docker Event Listener, Git Updater)
+│   ├── services/       # 后台服务 (Docker Event Listener)
 ├── data/               # 数据持久化目录 (SQLite 数据库文件)
 ├── docker-compose.yml  # Docker Compose 编排文件
 ├── Dockerfile          # Docker 镜像构建文件

@@ -111,12 +111,6 @@ You can configure the service by modifying the `environment` section in `docker-
 | `ADMIN_USER` | `admin` | Username for Web Admin UI |
 | `ADMIN_PASSWORD` | `...` | Password for Web Admin UI |
 | `IGNORED_EVENTS` | `exec_create,exec_start,exec_die` | Event types to ignore in Docker event stream |
-| `GIT_AUTO_UPDATE` | `true` | Enable/Disable Git auto-update feature |
-| `GIT_REPO_URL` | `...` | Git repository URL for auto-update |
-| `GIT_BRANCH` | `main` | Git branch to track |
-| `GIT_CHECK_INTERVAL` | `60` | Auto-update check interval (in seconds) |
-| `GIT_USER` | `...` | Git username (if required) |
-| `GIT_PASSWORD` | `...` | Git password (if required) |
 | `HOST_FILESYSTEM_ROOT` | `/hostfs` | Mount path of host root directory inside container |
 
 ## 📂 Project Structure
@@ -127,7 +121,7 @@ You can configure the service by modifying the `environment` section in `docker-
 │   ├── core/           # Core config, security, utils
 │   ├── db/             # Database models and connection
 │   ├── routers/        # API routers (Containers, Images, WebUI, etc.)
-│   ├── services/       # Background services (Docker Event Listener, Git Updater)
+│   ├── services/       # Background services (Docker Event Listener)
 ├── data/               # Data persistence directory (SQLite database)
 ├── docker-compose.yml  # Docker Compose orchestration file
 ├── Dockerfile          # Docker image build file
