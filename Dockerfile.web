@@ -1,0 +1,20 @@
+FROM nginx:alpine
+
+# 安装下载和解压工具
+RUN apk add --no-cache wget unzip
+
+WORKDIR /tmp
+
+# 从 GitHub Releases 下载最新的 web-build.zip
+# 发布 release 时需包含 web-build.zip 作为 asset（通过 flutter build web 打包的产物）
+ARG RELEASE_REPO=CodeFuckee/mobile_portainer_flutter_module
+RUN wget -O web-build.zip \
+    "https://github.com/${RELEASE_REPO}/releases/latest/download/web-build.zip" && \
+    unzip web-build.zip -d /usr/share/nginx/html && \
+    rm web-build.zip
+
+COPY nginx.web.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

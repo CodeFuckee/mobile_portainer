@@ -24,3 +24,12 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    restart: unless-stopped
+    container_name: mobile-portainer-web
