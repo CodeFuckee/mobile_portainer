@@ -1,9 +1,8 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
-router = APIRouter(
-    tags=["web_ui"]
-)
+router = APIRouter(tags=["web_ui"])
+
 
 @router.get("/", response_class=HTMLResponse)
 async def admin_page():
@@ -57,7 +56,7 @@ async def admin_page():
 
         <div class="container-fluid">
             <h2 class="mb-4">🔑 API Key Manager</h2>
-            
+
             <div class="card mb-4">
                 <div class="card-header">Cluster Nodes</div>
                 <div class="card-body">
@@ -109,7 +108,7 @@ async def admin_page():
                     <!-- Keys will be loaded here -->
                 </div>
             </div>
-            
+
             <div class="mt-4 text-muted small">
                 <p>API Endpoint: <code>/containers</code></p>
                 <p>Header: <code>X-API-Key: &lt;your-key&gt;</code></p>
@@ -134,12 +133,12 @@ async def admin_page():
                 const password = document.getElementById('admin-password').value;
                 // Verify credentials by trying to fetch keys
                 const response = await fetch(`${API_URL}/admin/keys`, {
-                    headers: { 
+                    headers: {
                         'X-Admin-User': user,
-                        'X-Admin-Pass': password 
+                        'X-Admin-Pass': password
                     }
                 });
-                
+
                 if (response.ok) {
                     localStorage.setItem('admin_user', user);
                     localStorage.setItem('admin_token', password);
@@ -154,9 +153,9 @@ async def admin_page():
 
             async function loadNodes() {
                 const response = await fetch(`${API_URL}/admin/nodes`, {
-                    headers: { 
+                    headers: {
                         'X-Admin-User': adminUser,
-                        'X-Admin-Pass': adminToken 
+                        'X-Admin-Pass': adminToken
                     }
                 });
                 if (!response.ok) return;
@@ -186,10 +185,10 @@ async def admin_page():
                 const pass = document.getElementById('node-pass').value;
                 const response = await fetch(`${API_URL}/admin/nodes`, {
                     method: 'POST',
-                    headers: { 
+                    headers: {
                         'Content-Type': 'application/json',
                         'X-Admin-User': adminUser,
-                        'X-Admin-Pass': adminToken 
+                        'X-Admin-Pass': adminToken
                     },
                     body: JSON.stringify({ name, base_url, admin_user: user, admin_pass: pass })
                 });
@@ -207,9 +206,9 @@ async def admin_page():
             async function deleteNode(id) {
                 const response = await fetch(`${API_URL}/admin/nodes/${id}`, {
                     method: 'DELETE',
-                    headers: { 
+                    headers: {
                         'X-Admin-User': adminUser,
-                        'X-Admin-Pass': adminToken 
+                        'X-Admin-Pass': adminToken
                     }
                 });
                 if (response.ok) loadNodes();
@@ -217,9 +216,9 @@ async def admin_page():
 
             async function loadKeys() {
                 const response = await fetch(`${API_URL}/admin/keys`, {
-                    headers: { 
+                    headers: {
                         'X-Admin-User': adminUser,
-                        'X-Admin-Pass': adminToken 
+                        'X-Admin-Pass': adminToken
                     }
                 });
                 if (response.status === 401) {
@@ -252,10 +251,10 @@ async def admin_page():
                 const note = document.getElementById('new-note').value;
                 const applyAll = document.getElementById('apply-all').checked;
                 const selected = Array.from(document.querySelectorAll('#nodes-list input[type=checkbox]:checked')).map(x => x.value);
-                
+
                 const response = await fetch(`${API_URL}/admin/keys`, {
                     method: 'POST',
-                    headers: { 
+                    headers: {
                         'Content-Type': 'application/json',
                         'X-Admin-User': adminUser,
                         'X-Admin-Pass': adminToken
@@ -279,24 +278,24 @@ async def admin_page():
                 const selected = Array.from(document.querySelectorAll('#nodes-list input[type=checkbox]:checked')).map(x => x.value);
                 const response = await fetch(`${API_URL}/admin/keys/${key}`, {
                     method: 'DELETE',
-                    headers: { 
+                    headers: {
                         'X-Admin-User': adminUser,
-                        'X-Admin-Pass': adminToken 
+                        'X-Admin-Pass': adminToken
                     }
                 });
                 if (response.ok) loadKeys();
 
                 await fetch(`${API_URL}/admin/keys/${key}/propagate`, {
                     method: 'DELETE',
-                    headers: { 
+                    headers: {
                         'Content-Type': 'application/json',
                         'X-Admin-User': adminUser,
-                        'X-Admin-Pass': adminToken 
+                        'X-Admin-Pass': adminToken
                     },
                     body: JSON.stringify({ apply_all: applyAll, targets: selected })
                 });
             }
-            
+
             function logout() {
                 localStorage.removeItem('admin_user');
                 localStorage.removeItem('admin_token');
@@ -307,20 +306,20 @@ async def admin_page():
                 const modal = new bootstrap.Modal(document.getElementById('qrModal'));
                 const qrContainer = document.getElementById('qrcode');
                 qrContainer.innerHTML = ''; // Clear previous
-                
+
                 const data = {
                     apikey: apiKey,
                     url: window.location.origin
                 };
-                
+
                 const jsonStr = JSON.stringify(data);
-                
+
                 new QRCode(qrContainer, {
                     text: jsonStr,
                     width: 256,
                     height: 256
                 });
-                
+
                 // document.getElementById('qr-content-preview').innerText = jsonStr;
                 modal.show();
             }

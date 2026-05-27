@@ -3,11 +3,15 @@ from fastapi import HTTPException
 import socket
 from typing import Dict, Any
 
+
 def get_docker_client():
     try:
         return docker.from_env()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to connect to Docker daemon: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to connect to Docker daemon: {str(e)}"
+        )
+
 
 def get_self_container(client):
     """
@@ -17,7 +21,7 @@ def get_self_container(client):
     self_id = get_current_container_id()
     if not self_id:
         return None
-        
+
     try:
         return client.containers.get(self_id)
     except docker.errors.NotFound:
@@ -30,8 +34,9 @@ def get_self_container(client):
                     return c
     except Exception:
         pass
-        
+
     return None
+
 
 def get_current_container_id():
     """
@@ -52,11 +57,12 @@ def get_current_container_id():
     # Fallback to hostname
     return socket.gethostname()
 
+
 def process_container_summary(container, self_id: str = None) -> Dict[str, Any]:
     # Stack
     labels = container.labels or {}
     stack = labels.get("com.docker.compose.project", "")
-    
+
     # Image
     image = container.attrs.get("Image", "")
     if image.startswith("sha256:"):
@@ -65,23 +71,33 @@ def process_container_summary(container, self_id: str = None) -> Dict[str, Any]:
                 image = container.image.tags[0]
         except Exception:
             pass
-    
+
     # Ports
+    ports_str_list = []
     ports_list = []
     raw_ports = container.attrs.get("Ports", [])
     for p in raw_ports:
         if "PublicPort" in p:
-            ports_list.append(f"{p['PublicPort']}->{p['PrivatePort']}/{p['Type']}")
-    ports = ", ".join(ports_list)
+            ports_str_list.append(f"{p['PublicPort']}->{p['PrivatePort']}/{p['Type']}")
+        ports_list.append(
+            {
+                "public_port": p.get("PublicPort"),
+                "private_port": p.get("PrivatePort"),
+                "type": p.get("Type"),
+            }
+        )
+    ports = ", ".join(ports_str_list)
 
     is_self = False
     if self_id:
         # Check against full ID or short ID
         if container.id == self_id:
             is_self = True
-        elif container.id.startswith(self_id): # self_id is short
+        elif container.id.startswith(self_id):  # self_id is short
             is_self = True
-        elif self_id.startswith(container.id): # self_id is somehow longer (unlikely if container.id is full)
+        elif self_id.startswith(
+            container.id
+        ):  # self_id is somehow longer (unlikely if container.id is full)
             is_self = True
 
     return {
@@ -91,5 +107,6 @@ def process_container_summary(container, self_id: str = None) -> Dict[str, Any]:
         "stack": stack,
         "image": image,
         "ports": ports,
-        "is_self": is_self
+        "ports_list": ports_list,
+        "is_self": is_self,
     }
