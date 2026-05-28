@@ -1,9 +1,9 @@
-FROM nginx:alpine
+FROM docker.1ms.run/nginx:alpine
 
 RUN apk add --no-cache wget unzip
 
 ARG GITHUB_REPO=CodeFuckee/mobile_portainer_flutter_module
-# GitHub 标准 latest release 下载链接
+# 下载源，默认 github.com（国内用户可构建时覆盖为镜像站）
 ARG DOWNLOAD_BASE=https://github.com
 
 RUN wget -O /tmp/web-build.zip \

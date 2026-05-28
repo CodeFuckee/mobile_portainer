@@ -14,7 +14,7 @@ from app.routers import (
     system,
     admin,
     websockets,
-    web_ui,
+    # web_ui,  # 前端已迁移至独立 Flutter Web 服务
     stacks,
     docker_proxy,
 )
@@ -52,8 +52,8 @@ app.include_router(websockets.router)
 if DOCKER_ENGINE_API_ENABLED:
     app.include_router(docker_proxy.router)
 
-# Include web UI router last
-app.include_router(web_ui.router)
+# Web UI 前端已迁移至独立 Flutter Web 服务（nginx 容器）
+# app.include_router(web_ui.router)
 
 
 @app.on_event("startup")

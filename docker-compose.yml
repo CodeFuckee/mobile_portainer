@@ -2,9 +2,9 @@ version: '3.8'
 
 services:
   api:
-    build: .
-    ports:
-      - "8000:8000"
+    build:
+      context: .
+      dockerfile: Dockerfile
     environment:
       - ADMIN_USER=${ADMIN_USER:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-password}
@@ -13,7 +13,6 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data:/app/data
-      - .:/app
       - /:/hostfs:ro
       - /proc:/hostfs/proc:ro
     restart: unless-stopped
@@ -23,6 +22,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
+      args:
+        - HTTPS_PROXY=${HTTPS_PROXY:-}
+        - HTTP_PROXY=${HTTP_PROXY:-}
     ports:
       - "${WEB_PORT:-8080}:80"
     restart: unless-stopped

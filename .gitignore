@@ -16,3 +16,5 @@ __pycache__/
 .idea/
 .vscode/
 key.txt
+web-build/
+web-build.zip

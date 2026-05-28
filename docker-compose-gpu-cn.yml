@@ -2,9 +2,9 @@ version: '3.8'
 
 services:
   api:
-    build: ./Dockerfile.cn
-    ports:
-      - "8000:8000"
+    build:
+      context: .
+      dockerfile: Dockerfile.cn
     environment:
       - ADMIN_USER=${ADMIN_USER:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-password}
@@ -28,7 +28,7 @@ services:
   web:
     build:
       context: .
-      dockerfile: Dockerfile.web
+      dockerfile: Dockerfile.web.cn
     ports:
       - "${WEB_PORT:-8080}:80"
     restart: unless-stopped
