@@ -18,6 +18,96 @@ except ImportError:
 
 router = APIRouter(tags=["system"], dependencies=[Depends(get_api_key)])
 
+# 浏览器黑名单端口（Chrome/Firefox 默认阻止的端口）
+# 参考: https://chromium.googlesource.com/chromium/src/+/refs/heads/main/net/base/port_util.cc
+BROWSER_BLOCKED_PORTS = frozenset(
+    {
+        1,  # tcpmux
+        7,  # echo
+        9,  # discard
+        11,  # systat
+        13,  # daytime
+        15,  # netstat
+        17,  # qotd
+        19,  # chargen
+        20,  # ftp-data
+        21,  # ftp
+        22,  # ssh
+        23,  # telnet
+        25,  # smtp
+        37,  # time
+        42,  # nameserver
+        43,  # nicname
+        53,  # domain
+        69,  # tftp
+        77,  # priv-rjs
+        79,  # finger
+        87,  # link
+        95,  # supdup
+        101,  # hostname
+        102,  # iso-tsap
+        103,  # gppitnp
+        104,  # acr-nema
+        109,  # pop2
+        110,  # pop3
+        111,  # sunrpc
+        113,  # auth
+        115,  # sftp
+        117,  # uucp-path
+        119,  # nntp
+        123,  # ntp
+        135,  # epmap
+        137,  # netbios-ns
+        138,  # netbios-dgm
+        139,  # netbios-ssn
+        143,  # imap
+        161,  # snmp
+        179,  # bgp
+        389,  # ldap
+        427,  # svrloc
+        465,  # smtps (alt)
+        512,  # exec / comsat
+        513,  # login / who
+        514,  # shell / syslog
+        515,  # printer
+        526,  # tempo
+        530,  # courier
+        531,  # chat / irc
+        532,  # netnews / readnews
+        533,  # netwall
+        540,  # uucp
+        548,  # afp
+        554,  # rtsp (alt)
+        555,  # rtsps (alt)
+        556,  # remotefs
+        563,  # nntps
+        587,  # submission
+        601,  # syslog-conn
+        636,  # ldaps
+        989,  # ftps-data
+        990,  # ftps
+        993,  # imaps
+        995,  # pop3s
+        1719,  # h323gatestat
+        1720,  # h323hostcall
+        1723,  # pptp
+        2049,  # nfs
+        3659,  # apple-sasl
+        4045,  # npp
+        5060,  # sip
+        5061,  # sips
+        6000,  # X11
+        6566,  # sane-port
+        6665,  # irc (alt)
+        6666,  # irc (alt)
+        6667,  # irc (default)
+        6668,  # irc (alt)
+        6669,  # irc (alt)
+        6697,  # ircs
+        10080,  # amanda
+    }
+)
+
 
 @router.get("/info")
 async def get_system_info():
@@ -480,6 +570,9 @@ async def get_available_ports():
         used_ports = await asyncio.get_event_loop().run_in_executor(
             None, _get_host_used_ports
         )
+
+        # 将浏览器黑名单端口也视为不可用
+        used_ports |= set(BROWSER_BLOCKED_PORTS)
 
         # Calculate available ranges
         sorted_used = sorted(list(used_ports))
