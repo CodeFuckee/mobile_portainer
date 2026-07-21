@@ -18,3 +18,13 @@ class ClusterNode(Base):
     admin_user = Column(String)
     admin_pass = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AdminCredentialModel(Base):
+    """管理员密码哈希；固定使用 id=1 的单条配置记录。"""
+
+    __tablename__ = "admin_credentials"
+
+    id = Column(Integer, primary_key=True, default=1)
+    password_hash = Column(String, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

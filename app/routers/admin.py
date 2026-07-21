@@ -1,22 +1,28 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 import uuid
 import requests
-from app.core.security import get_api_key
+from app.core.security import get_api_key, hash_password, verify_admin_credentials
+from app.core.config import ADMIN_USER
 from app.db.database import get_db
-from app.db.models import APIKeyModel, ClusterNode
-from app.core.config import ADMIN_USER, ADMIN_PASSWORD
+from app.db.models import APIKeyModel, AdminCredentialModel, ClusterNode
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=8, max_length=256)
 
 
 @router.post("/login")
 def login(request: Request, db: Session = Depends(get_db)):
     admin_user = request.headers.get("X-Admin-User")
     admin_pass = request.headers.get("X-Admin-Pass")
-    if admin_user != ADMIN_USER or admin_pass != ADMIN_PASSWORD:
+    if not verify_admin_credentials(db, admin_user, admin_pass):
         raise HTTPException(status_code=401, detail="Invalid Admin Credentials")
 
     # 查找已有的 API key，没有则自动创建
@@ -29,6 +35,22 @@ def login(request: Request, db: Session = Depends(get_db)):
         db.refresh(api_key)
 
     return {"api_key": api_key.key, "id": api_key.id, "note": api_key.note}
+
+
+@router.post("/password")
+def change_password(data: ChangePasswordRequest, db: Session = Depends(get_db)):
+    """校验当前管理员密码后，持久化保存新的密码哈希。"""
+    if not verify_admin_credentials(db, ADMIN_USER, data.current_password):
+        raise HTTPException(status_code=401, detail="当前密码不正确")
+
+    credential = db.get(AdminCredentialModel, 1)
+    password_hash = hash_password(data.new_password)
+    if credential:
+        credential.password_hash = password_hash
+    else:
+        db.add(AdminCredentialModel(id=1, password_hash=password_hash))
+    db.commit()
+    return {"message": "密码修改成功"}
 
 
 @router.get("/keys", dependencies=[Depends(get_api_key)])

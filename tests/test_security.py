@@ -43,6 +43,35 @@ class TestAdminAuthentication:
         response = client.get("/admin/keys", headers=admin_headers)
         assert response.status_code == 200
 
+    def test_change_password_requires_current_password(self, client, admin_headers):
+        """当前密码错误时不应修改密码。"""
+        response = client.post(
+            "/admin/password",
+            json={"current_password": "wrong", "new_password": "new-password"},
+        )
+        assert response.status_code == 401
+
+        response = client.get("/admin/keys", headers=admin_headers)
+        assert response.status_code == 200
+
+    def test_change_password_updates_admin_authentication(self, client, admin_headers):
+        """修改成功后仅新密码可用于管理员认证。"""
+        response = client.post(
+            "/admin/password",
+            json={"current_password": "password", "new_password": "new-password"},
+        )
+        assert response.status_code == 200
+        assert response.json() == {"message": "密码修改成功"}
+
+        assert client.get("/admin/keys", headers=admin_headers).status_code == 401
+        assert (
+            client.get(
+                "/admin/keys",
+                headers={"X-Admin-User": "admin", "X-Admin-Pass": "new-password"},
+            ).status_code
+            == 200
+        )
+
 
 class TestAdminAPIKeys:
     def test_list_keys_empty(self, client, admin_headers):
