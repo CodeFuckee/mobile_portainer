@@ -25,6 +25,9 @@
   - 内置 Git 自动更新服务，可配置定时检查远程仓库并自动更新重启。
 - **系统监控**:
   - 支持挂载宿主机根目录，用于监控宿主机资源使用情况。
+- **MCP Server**:
+  - 内置 MCP (Model Context Protocol) 服务，为 AI 助手（如 Claude Desktop）暴露 24 个 Docker 管理工具。
+  - 通过自然语言对话即可管理容器、镜像、网络、卷和系统资源。
 
 ## 🛠️ 技术栈
 
@@ -147,6 +150,7 @@ Content-Type: application/json
 ├── app/
 │   ├── core/           # 核心配置、安全认证、工具函数
 │   ├── db/             # 数据库模型 (Models) 与连接 (Database)
+│   ├── mcp/            # MCP 服务 (Model Context Protocol) 工具与入口
 │   ├── routers/        # API 路由模块 (Containers, Images, WebUI 等)
 │   ├── services/       # 后台服务 (Docker Event Listener)
 ├── data/               # 数据持久化目录 (SQLite 数据库文件)
@@ -169,3 +173,55 @@ X-API-Key: <在Web界面生成的API Key>
 ```
 
 你可以在 Web 管理界面 (`/`) 登录后生成和管理这些 API Key。
+
+## 🔌 MCP Server
+
+Mobile Portainer 内置了 [MCP (Model Context Protocol)](https://modelcontextprotocol.io) 服务，允许 AI 助手（如 Claude Desktop、Cursor 和其他兼容 MCP 的客户端）通过自然语言对话直接管理 Docker 资源。
+
+### 工作原理
+
+MCP 服务以独立子进程方式运行，通过 **stdio** 与 AI 客户端通信。它**不**作为 FastAPI HTTP 服务的一部分运行 —— 而是由 AI 客户端直接拉起。该服务提供 **24 个 Docker 管理工具**，分为 5 类：
+
+| 类别 | 工具 |
+| :--- | :--- |
+| **容器 (Containers)** | `list_containers`、`get_container`、`get_container_logs`、`start_container`、`stop_container`、`restart_container`、`kill_container`、`pause_container`、`unpause_container`、`remove_container`、`run_container` |
+| **镜像 (Images)** | `list_images`、`get_image`、`pull_image`、`remove_image` |
+| **网络 (Networks)** | `list_networks`、`get_network` |
+| **卷 (Volumes)** | `list_volumes`、`get_volume`、`remove_volume` |
+| **系统 (System)** | `get_system_info`、`get_system_usage`、`list_stacks`、`get_stack_containers` |
+
+`get_system_info` 工具可将 Docker 统计信息、Git 版本信息和系统资源使用情况聚合到单次响应中。`run_container` 工具可解析自然的 `docker run` 风格命令，因此你可以直接说"在后台运行 nginx"，它就能正常工作。
+
+### 启动服务
+
+```bash
+python -m app.mcp.server
+```
+
+### Claude Desktop 配置
+
+将以下内容添加到 `claude_desktop_config.json` 中：
+
+```json
+{
+  "mcpServers": {
+    "mobile-portainer": {
+      "command": "python",
+      "args": ["-m", "app.mcp.server"],
+      "env": {
+        "MOBILE_PORTAINER_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+### 认证方式
+
+MCP 服务按以下优先级验证 API Key：
+
+1. **环境变量优先** — 如果设置了 `MOBILE_PORTAINER_API_KEY`，则 Key 必须完全匹配。
+2. **数据库回退** — 如果未设置环境变量，则在 `api_keys` 数据库表中查找（通过 Web 管理界面管理的 Key）。
+3. **无认证模式** — 如果两者均未配置，则允许所有请求通过。
+
+> ⚠️ 生产环境建议务必设置 `MOBILE_PORTAINER_API_KEY` 或通过 Web 管理界面管理 Key。

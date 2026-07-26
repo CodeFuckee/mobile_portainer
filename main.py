@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import asyncio
 import threading
+from contextlib import asynccontextmanager
 from app.db.database import engine, Base
 from app.services.docker_monitor import docker_event_listener
 
@@ -20,6 +21,7 @@ from app.routers import (
     docker_proxy,
 )
 from app.core.config import DOCKER_ENGINE_API_ENABLED
+from app.mcp.http_server import mcp_http_app, mcp_session_manager
 
 # Initialize Database
 Base.metadata.create_all(bind=engine)
@@ -50,6 +52,7 @@ Mobile Portainer 是一款轻量级的 Docker 管理 API，支持容器、镜像
 - **Admin** — API Key 管理、管理员凭据、集群配置
 - **Docker Engine API** — 原生 Docker API 透传代理
 - **WebSocket** — 容器状态实时推送
+- **MCP** — MCP Streamable HTTP 端点，供 AI 助手管理 Docker 资源
 """
 
 TAGS_METADATA = [
@@ -73,11 +76,30 @@ TAGS_METADATA = [
     {"name": "websockets", "description": "WebSocket — 容器状态实时推送"},
 ]
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理：启动 Docker 事件监听和 MCP 会话管理器。"""
+    # Startup
+    loop = asyncio.get_event_loop()
+    threading.Thread(target=docker_event_listener, args=(loop,), daemon=True).start()
+
+    # 启动 MCP session manager
+    async with mcp_session_manager.run():
+        yield
+
+    # Shutdown
+    from app.core.docker_socket import close_docker_http_client
+
+    await close_docker_http_client()
+
+
 app = FastAPI(
     title="Mobile Portainer API",
     description=DESCRIPTION,
     version="1.0.0",
     openapi_tags=TAGS_METADATA,
+    lifespan=lifespan,
     swagger_ui_parameters={
         "persistAuthorization": True,  # 刷新页面后保留认证信息
         "displayRequestDuration": True,  # 显示请求耗时
@@ -113,19 +135,9 @@ if DOCKER_ENGINE_API_ENABLED:
 # 挂载静态文件目录（用于头像等上传文件访问）
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# 挂载 MCP Streamable HTTP 端点
+app.mount("/mcp", mcp_http_app)
+
+
 # Web UI 前端已迁移至独立 Flutter Web 服务（nginx 容器）
 # app.include_router(web_ui.router)
-
-
-@app.on_event("startup")
-async def startup_event():
-    # Start Docker Event Listener
-    loop = asyncio.get_event_loop()
-    threading.Thread(target=docker_event_listener, args=(loop,), daemon=True).start()
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    from app.core.docker_socket import close_docker_http_client
-
-    await close_docker_http_client()
