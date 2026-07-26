@@ -19,3 +19,25 @@ DOCKER_SOCKET_PATH = os.getenv("DOCKER_SOCKET_PATH", "/var/run/docker.sock")
 DOCKER_ENGINE_API_ENABLED = (
     os.getenv("DOCKER_ENGINE_API_ENABLED", "true").lower() == "true"
 )
+
+
+# --- 头像上传 ---
+import pathlib
+
+AVATAR_UPLOAD_DIR = os.getenv(
+    "AVATAR_UPLOAD_DIR",
+    str(pathlib.Path(__file__).resolve().parent.parent.parent / "static" / "avatars"),
+)
+MAX_AVATAR_SIZE = int(os.getenv("MAX_AVATAR_SIZE", str(2 * 1024 * 1024)))  # 默认 2MB
+ALLOWED_AVATAR_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+# --- 邮件（SMTP）---
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "")
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Mobile Portainer")
+SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
+SMTP_USE_STARTTLS = os.getenv("SMTP_USE_STARTTLS", "true").lower() == "true"
+SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "10"))

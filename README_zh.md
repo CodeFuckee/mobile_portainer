@@ -112,6 +112,33 @@ services:
 | `ADMIN_PASSWORD` | `...` | Web 管理界面的登录密码 |
 | `IGNORED_EVENTS` | `exec_create,exec_start,exec_die` | Docker 事件流中忽略的事件类型 |
 | `HOST_FILESYSTEM_ROOT` | `/hostfs` | 宿主机根目录在容器内的挂载路径 |
+| `SMTP_HOST` | 空 | SMTP 服务器地址；配置后可调用邮件发送接口 |
+| `SMTP_PORT` | `587` | SMTP 端口 |
+| `SMTP_USERNAME` | 空 | SMTP 登录用户名（可选） |
+| `SMTP_PASSWORD` | 空 | SMTP 登录密码或授权码（仅环境变量保存，接口不返回） |
+| `SMTP_FROM_EMAIL` | 空 | 发件人邮箱地址 |
+| `SMTP_FROM_NAME` | `Mobile Portainer` | 发件人显示名称 |
+| `SMTP_USE_SSL` | `false` | 是否使用 SMTP SSL（通常为 465 端口） |
+| `SMTP_USE_STARTTLS` | `true` | 是否使用 STARTTLS（通常为 587 端口；与 SSL 不能同时启用） |
+| `SMTP_TIMEOUT` | `10` | SMTP 连接与发送超时秒数 |
+
+## ✉️ 发送邮件
+
+配置 `SMTP_HOST` 和 `SMTP_FROM_EMAIL` 后，可使用已认证的管理员凭据或 API Key 调用以下接口。`GET /admin/email/config` 仅返回非敏感配置状态，`POST /admin/email/send` 将邮件发送给指定用户：
+
+```http
+POST /admin/email/send HTTP/1.1
+Host: localhost:8000
+X-API-Key: <API Key>
+Content-Type: application/json
+
+{
+  "recipients": ["user@example.com"],
+  "subject": "通知标题",
+  "text_body": "纯文本内容",
+  "html_body": "<p>可选 HTML 内容</p>"
+}
+```
 
 ## 📂 项目结构
 

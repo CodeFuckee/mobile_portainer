@@ -10,7 +10,11 @@ from app.core.config import API_KEY_NAME, ADMIN_USER, ADMIN_PASSWORD
 from app.db.database import get_db
 from app.db.models import APIKeyModel, AdminCredentialModel
 
-api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+api_key_header = APIKeyHeader(
+    name=API_KEY_NAME,
+    description="输入你的 API Key（也可使用 Authorization: Bearer <token> 格式）",
+    auto_error=False,
+)
 
 
 _PASSWORD_HASH_ITERATIONS = 600_000
@@ -68,18 +72,34 @@ def _verify_admin_credentials(request: Request, db: Session) -> bool:
     )
 
 
+def _extract_api_key_from_request(request: Request) -> str | None:
+    """从请求中提取 API Key，支持多种传递方式。"""
+    # 1. X-API-Key 请求头
+    api_key = request.headers.get(API_KEY_NAME)
+    if api_key:
+        return api_key
+
+    # 2. Authorization: Bearer <token>
+    auth_header = request.headers.get("Authorization")
+    if auth_header:
+        scheme, _, token = auth_header.partition(" ")
+        if scheme.lower() == "bearer" and token:
+            return token
+
+    return None
+
+
 async def get_api_key(
     request: Request,
     api_key_header: str = Security(api_key_header),
     db: Session = Depends(get_db),
 ):
-    # 先尝试 API Key 认证
-    if api_key_header:
-        key_record = (
-            db.query(APIKeyModel).filter(APIKeyModel.key == api_key_header).first()
-        )
+    # 先尝试 API Key 认证（支持 X-API-Key 和 Authorization: Bearer）
+    api_key = _extract_api_key_from_request(request)
+    if api_key:
+        key_record = db.query(APIKeyModel).filter(APIKeyModel.key == api_key).first()
         if key_record:
-            return api_key_header
+            return api_key
 
     # 回退到 Admin 凭据认证（Web UI 登录用户）
     if _verify_admin_credentials(request, db):

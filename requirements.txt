@@ -6,3 +6,5 @@ GitPython
 psutil
 gputil
 httpx>=0.27.0
+python-multipart>=0.0.32
+aiofiles>=23.0
