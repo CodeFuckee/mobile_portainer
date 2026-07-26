@@ -1,8 +1,62 @@
 """
-MCP 工具定义。
+MCP 工具定义 — Docker 资源管理工具集。
 
 通过 register_all_tools(server) 将 24 个 Docker 管理工具注册到 MCP Server。
-工具分为 5 组：容器(11)、镜像(4)、网络(2)、卷(3)、系统(4)。
+这些工具被 AI 助手（如 Claude）通过 MCP 协议调用，实现对 Docker 资源的声明式管理。
+
+=== 工具分组 ===
+
+本模块定义了 5 组共 24 个工具：
+
+【容器工具 — 11 个】
+  list_containers     — 列出所有容器（支持摘要模式）
+  get_container       — 获取指定容器的完整详情
+  get_container_logs  — 获取容器日志
+  start_container     — 启动已停止的容器
+  stop_container      — 正常停止运行中的容器
+  restart_container   — 重启容器
+  kill_container      — 强制终止容器（SIGKILL）
+  pause_container     — 暂停容器中的所有进程
+  unpause_container   — 恢复暂停的容器
+  remove_container    — 删除容器（可选强制+删除卷）
+  run_container       — 使用 docker run 命令字符串创建新容器
+
+【镜像工具 — 4 个】
+  list_images    — 列出所有镜像（含使用状态）
+  get_image      — 获取指定镜像详情
+  pull_image     — 从注册表拉取镜像
+  remove_image   — 删除镜像
+
+【网络工具 — 2 个】
+  list_networks  — 列出所有 Docker 网络
+  get_network    — 获取指定网络详情
+
+【卷工具 — 3 个】
+  list_volumes   — 列出所有卷（含使用状态）
+  get_volume     — 获取指定卷详情（含使用它的容器列表）
+  remove_volume  — 删除卷
+
+【系统工具 — 4 个】
+  get_system_info       — 聚合系统信息（Docker 统计 + Git 版本 + 系统资源）
+  get_system_usage      — 实时系统资源使用（CPU、内存、磁盘、GPU）
+  list_stacks           — 列出 Docker Compose 项目
+  get_stack_containers  — 获取指定 Compose 项目的所有容器
+
+=== 工具函数设计规范 ===
+
+每个工具函数遵循统一的设计模式：
+
+1. 参数校验：通过函数签名中的类型注解进行
+2. 客户端获取：调用 get_docker_client_safe() 获取 Docker 连接
+3. 核心逻辑：执行 Docker 操作
+4. 错误处理：捕获 docker.errors 异常，转为 RuntimeError（含中文描述）
+5. 资源释放：finally 块中调用 client.close()
+
+=== 与其他模块的关系 ===
+
+- helpers.py：提供 get_docker_client_safe()、get_db_session()、check_api_key()
+- app.core.utils：提供 process_container_summary()、parse_docker_run_command()
+- auth_provider.py：提供 OAuth 认证（独立于工具层，由 MCP 框架处理）
 """
 
 import os
@@ -21,6 +75,9 @@ from app.core.utils import (
 
 from .helpers import get_docker_client_safe, get_db_session
 
+# ---- 可选依赖 ----
+# GPUtil 用于 GPU 监控，不是所有环境都需要
+# 如果未安装，GPU 相关功能静默跳过
 try:
     import GPUtil
 except ImportError:
@@ -28,12 +85,43 @@ except ImportError:
 
 
 def register_all_tools(server: FastMCP) -> None:
-    """向 MCP Server 注册所有 Docker 管理工具。"""
+    """向 MCP Server 注册所有 Docker 管理工具。
 
-    # ==================== 容器工具 ====================
+    本函数使用 @server.tool() 装饰器注册 24 个工具函数。
+    每个工具通过 description 参数提供中文描述，
+    AI 助手根据描述来决定何时调用哪个工具。
+
+    工具函数的类型注解（参数类型和返回类型）会被 FastMCP 自动
+    转换为 MCP 工具的 JSON Schema，供客户端进行参数验证。
+
+    参数:
+        server: FastMCP 实例，工具会被注册到此实例上
+    """
+
+    # ================================================================
+    # 容器工具（Container Tools）
+    # 提供容器的完整生命周期管理：列出、查看、启动、停止、重启、终止、
+    # 暂停、恢复、删除、创建。
+    # ================================================================
 
     @server.tool(description="列出所有 Docker 容器。可选择返回摘要信息或完整属性。")
     def list_containers(summary: bool = False, all: bool = True) -> list[dict]:
+        """列出所有 Docker 容器。
+
+        参数:
+            summary: True=返回精简摘要（名称、状态、端口、网络等），
+                     False=返回完整 attrs 字典
+            all: True=包括已停止的容器，False=仅运行中的容器
+
+        返回:
+            容器信息字典列表，摘要模式下包含：
+            - id, name, image, status, ports, networks, created, labels
+
+        设计说明:
+            摘要模式（summary=True）通过 process_container_summary() 处理，
+            输出的数据量与 docker ps 命令类似，适合 AI 助手快速了解环境概况。
+            self_id 用于标记当前运行的容器（避免 AI 误操作自身）。
+        """
         client = get_docker_client_safe()
         try:
             containers = client.containers.list(all=all)
@@ -45,9 +133,9 @@ def register_all_tools(server: FastMCP) -> None:
                     "id": c.id,
                     "short_id": c.short_id,
                     "name": c.name,
-                    "status": str(c.status).lower(),
+                    "status": str(c.status).lower(),  # 统一小写，如 "running", "exited"
                     "image": str(c.image),
-                    "attrs": c.attrs,
+                    "attrs": c.attrs,  # 完整的 Docker inspect 输出
                 }
                 for c in containers
             ]
@@ -56,6 +144,19 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="通过 ID 或名称获取指定容器的详细信息。")
     def get_container(container_id: str) -> dict:
+        """获取单个容器的完整详情。
+
+        等同于 docker inspect <container> 命令的输出。
+
+        参数:
+            container_id: 容器 ID（完整或短 ID）或名称
+
+        返回:
+            容器的完整 attrs 字典，包含所有配置、网络、挂载等信息
+
+        异常:
+            RuntimeError: 容器不存在时抛出
+        """
         client = get_docker_client_safe()
         try:
             return client.containers.get(container_id).attrs
@@ -68,6 +169,21 @@ def register_all_tools(server: FastMCP) -> None:
     def get_container_logs(
         container_id: str, tail: int = 2000, timestamps: bool = True
     ) -> dict:
+        """获取容器的 stdout/stderr 日志。
+
+        参数:
+            container_id: 容器 ID 或名称
+            tail: 返回日志的最后 N 行（从尾部开始）。默认 2000 行，
+                  设为 "all" 可获取全部日志
+            timestamps: 是否在每行日志前添加时间戳（RFC3339Nano 格式）
+
+        返回:
+            {"logs": "日志内容字符串"}
+
+        编码处理:
+            使用 UTF-8 解码，遇到无法解码的字节用 replacement character (�) 替换。
+            这处理了容器输出二进制数据或非 UTF-8 编码的情况。
+        """
         client = get_docker_client_safe()
         try:
             container = client.containers.get(container_id)
@@ -82,6 +198,16 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="启动一个已停止的容器。")
     def start_container(container_id: str) -> dict:
+        """启动一个已停止的容器。
+
+        相当于 docker start <container>。
+
+        参数:
+            container_id: 容器 ID 或名称
+
+        返回:
+            {"status": "success", "message": "容器 xxx 已启动"}
+        """
         client = get_docker_client_safe()
         try:
             container = client.containers.get(container_id)
@@ -97,6 +223,19 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="正常停止一个正在运行的容器。")
     def stop_container(container_id: str) -> dict:
+        """正常停止一个正在运行的容器。
+
+        发送 SIGTERM 信号，等待容器优雅退出。
+        默认超时 10 秒后发送 SIGKILL 强制终止。
+
+        相当于 docker stop <container>。
+
+        参数:
+            container_id: 容器 ID 或名称
+
+        返回:
+            {"status": "success", "message": "容器 xxx 已停止"}
+        """
         client = get_docker_client_safe()
         try:
             container = client.containers.get(container_id)
@@ -112,6 +251,18 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="重启一个容器。")
     def restart_container(container_id: str) -> dict:
+        """重启一个容器。
+
+        相当于 docker restart <container>。
+        先停止再启动，容器内的临时文件系统会被保留
+        （除非使用了 --rm 选项且容器被删除）。
+
+        参数:
+            container_id: 容器 ID 或名称
+
+        返回:
+            {"status": "success", "message": "容器 xxx 已重启"}
+        """
         client = get_docker_client_safe()
         try:
             container = client.containers.get(container_id)
@@ -127,6 +278,21 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="强制终止（kill）一个容器。")
     def kill_container(container_id: str) -> dict:
+        """强制终止一个容器。
+
+        直接发送 SIGKILL 信号，不给容器优雅退出的机会。
+        相当于 docker kill <container>。
+
+        与 stop_container 的区别：
+        - stop: SIGTERM → 等待超时 → SIGKILL（优雅退出）
+        - kill: 直接 SIGKILL（立即终止）
+
+        参数:
+            container_id: 容器 ID 或名称
+
+        返回:
+            {"status": "success", "message": "容器 xxx 已终止"}
+        """
         client = get_docker_client_safe()
         try:
             container = client.containers.get(container_id)
@@ -142,6 +308,18 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="暂停容器中的所有进程。")
     def pause_container(container_id: str) -> dict:
+        """暂停容器中的所有进程。
+
+        使用 cgroups freezer 功能冻结容器进程。
+        相当于 docker pause <container>。
+        恢复使用 unpause_container。
+
+        参数:
+            container_id: 容器 ID 或名称
+
+        返回:
+            {"status": "success", "message": "容器 xxx 已暂停"}
+        """
         client = get_docker_client_safe()
         try:
             container = client.containers.get(container_id)
@@ -157,6 +335,17 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="恢复（取消暂停）一个容器。")
     def unpause_container(container_id: str) -> dict:
+        """恢复一个暂停的容器。
+
+        取消 cgroups freezer 的冻结状态，容器进程恢复运行。
+        相当于 docker unpause <container>。
+
+        参数:
+            container_id: 容器 ID 或名称
+
+        返回:
+            {"status": "success", "message": "容器 xxx 已恢复"}
+        """
         client = get_docker_client_safe()
         try:
             container = client.containers.get(container_id)
@@ -174,6 +363,22 @@ def register_all_tools(server: FastMCP) -> None:
     def remove_container(
         container_id: str, force: bool = True, v: bool = False
     ) -> dict:
+        """删除一个容器。
+
+        相当于 docker rm <container>。
+
+        参数:
+            container_id: 容器 ID 或名称
+            force: True=强制删除运行中的容器（先 SIGKILL 再删除），默认为 True
+            v: True=同时删除容器关联的匿名卷，默认为 False
+
+        返回:
+            {"status": "success", "message": "容器 xxx 已删除"}
+
+        安全注意事项:
+            - v=True 会删除匿名卷中的数据，不可恢复
+            - 命名卷（通过 docker volume create 创建）不会被删除
+        """
         client = get_docker_client_safe()
         try:
             container = client.containers.get(container_id)
@@ -195,11 +400,41 @@ def register_all_tools(server: FastMCP) -> None:
         )
     )
     def run_container(command: str) -> dict:
+        """使用 docker run 命令字符串创建并启动新容器。
+
+        这是唯一接受自然命令字符串的工具——AI 助手可以直接
+        写出类似命令行的 docker run 指令。
+
+        参数:
+            command: docker run 命令字符串（可带或不带 "docker run" 前缀）
+                     例如："docker run -d -p 8080:80 --name my-nginx nginx:latest"
+
+        返回:
+            {"status": "success", "id": "完整ID", "short_id": "短ID", "name": "容器名"}
+
+        命令解析:
+            使用 parse_docker_run_command() 将命令字符串解析为 docker-py 的
+            **kwargs 参数，支持镜像名、端口映射、环境变量、卷挂载、
+            重启策略等常用选项。
+
+        安全机制:
+            强制 detach=True（分离模式），避免 MCP 调用阻塞等待容器退出。
+            即使命令中指定了 -it 或未指定 -d，也会自动添加。
+
+        异常:
+            RuntimeError("无效命令"): 命令字符串无法解析
+            RuntimeError("未找到镜像"): 指定的镜像不存在
+            RuntimeError("Docker API 错误"): 其他 Docker 引擎错误
+        """
         client = get_docker_client_safe()
         try:
+            # 将 docker run 命令字符串解析为 docker-py 的 run() 参数
             params = parse_docker_run_command(command)
+
+            # 强制分离模式：避免 MCP 调用阻塞，等待容器退出
             if not params.get("detach"):
                 params["detach"] = True
+
             container = client.containers.run(**params)
             return {
                 "status": "success",
@@ -216,13 +451,36 @@ def register_all_tools(server: FastMCP) -> None:
         finally:
             client.close()
 
-    # ==================== 镜像工具 ====================
+    # ================================================================
+    # 镜像工具（Image Tools）
+    # 提供镜像的管理：列出、查看、拉取、删除。
+    # ================================================================
 
     @server.tool(description="列出所有 Docker 镜像，含使用状态。")
     def list_images() -> list[dict]:
+        """列出所有 Docker 镜像及其使用状态。
+
+        返回每个镜像的基本信息，同时标记哪些镜像正在被容器使用。
+        "in_use" 字段可以帮助 AI 助手判断哪些镜像可以安全删除。
+
+        返回:
+            镜像信息字典列表，每个包含：
+            - id: 完整镜像 ID
+            - tags: 标签列表（如 ["nginx:latest", "nginx:1.25"]）
+            - created: 创建时间（ISO 格式）
+            - size: 镜像大小（字节）
+            - labels: 镜像标签（metadata）
+            - short_id: 短 ID（前 12 字符）
+            - in_use: 是否至少有一个容器使用此镜像
+
+        性能考虑:
+            需要同时查询容器列表来确定 in_use 状态，
+            对大型环境（>100 容器）可能较慢。
+        """
         client = get_docker_client_safe()
         try:
             images = client.images.list()
+            # 收集所有容器使用的镜像 ID，用于计算 in_use 字段
             containers = client.containers.list(all=True)
             used_image_ids = {c.attrs["Image"] for c in containers}
             return [
@@ -242,6 +500,19 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="通过 ID 或名称（标签）获取指定镜像的详细信息。")
     def get_image(image_id: str) -> dict:
+        """获取指定镜像的完整详情（含使用状态）。
+
+        参数:
+            image_id: 镜像 ID（完整或短 ID）或名称/标签（如 "nginx:latest"）
+
+        返回:
+            镜像完整信息字典，在标准 attrs 基础上增加了：
+            - id, short_id, tags: 从 Image 对象提取
+            - in_use: 是否被容器使用
+
+        异常:
+            RuntimeError: 镜像不存在时抛出
+        """
         client = get_docker_client_safe()
         try:
             image = client.images.get(image_id)
@@ -260,6 +531,24 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="从注册表拉取一个 Docker 镜像。")
     def pull_image(image: str, tag: str = "latest") -> dict:
+        """从 Docker 注册表拉取镜像。
+
+        相当于 docker pull <image>:<tag>。
+        支持 Docker Hub 和私有注册表。
+
+        参数:
+            image: 镜像名称，如 "nginx"、"python"、"myregistry.example.com/myapp"
+            tag: 镜像标签，默认为 "latest"
+
+        返回:
+            {"status": "success", "id": "镜像ID", "tags": [...], "message": "..."}
+
+        异常:
+            RuntimeError: 拉取失败时抛出（如网络问题、认证失败、镜像不存在）
+
+        注意:
+            拉取大型镜像可能需要较长时间，MCP 客户端应考虑设置超时。
+        """
         client = get_docker_client_safe()
         try:
             pulled = client.images.pull(image, tag=tag)
@@ -278,6 +567,25 @@ def register_all_tools(server: FastMCP) -> None:
         description=("删除一个 Docker 镜像。image_id 可以是短 ID、完整 ID 或名称。")
     )
     def remove_image(image_id: str, force: bool = False) -> dict:
+        """删除一个 Docker 镜像。
+
+        相当于 docker rmi <image>。
+
+        参数:
+            image_id: 镜像 ID（完整或短 ID）或名称/标签
+            force: True=强制删除（即使有容器在使用），默认为 False
+
+        返回:
+            {"status": "success", "message": "镜像 xxx 已删除"}
+
+        异常:
+            RuntimeError("未找到镜像"): 镜像不存在
+            RuntimeError("删除镜像失败"): 镜像正在使用或其它错误
+
+        安全注意事项:
+            - force=True 会删除正在使用的镜像，可能导致容器无法重启
+            - 建议先通过 list_images() 确认镜像的 in_use 状态
+        """
         client = get_docker_client_safe()
         try:
             client.images.remove(image=image_id, force=force)
@@ -292,10 +600,28 @@ def register_all_tools(server: FastMCP) -> None:
         finally:
             client.close()
 
-    # ==================== 网络工具 ====================
+    # ================================================================
+    # 网络工具（Network Tools）
+    # 提供 Docker 网络的查看功能。
+    # ================================================================
 
     @server.tool(description="列出所有 Docker 网络。")
     def list_networks() -> list[dict]:
+        """列出所有 Docker 网络。
+
+        相当于 docker network ls + docker network inspect。
+
+        返回:
+            网络信息字典列表，每个包含：
+            - id: 完整网络 ID
+            - name: 网络名称（如 "bridge", "host", "my-network"）
+            - driver: 网络驱动（如 "bridge", "overlay", "macvlan"）
+            - scope: 作用域（"local" / "swarm" / "global"）
+            - ipam: IP 地址管理配置（子网、网关、IP 范围）
+            - containers: 连接到该网络的容器列表（含 IPv4/IPv6 地址）
+            - short_id: 短 ID
+            - created: 创建时间
+        """
         client = get_docker_client_safe()
         try:
             networks = client.networks.list()
@@ -317,6 +643,19 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="通过 ID 或名称获取指定网络的详细信息。")
     def get_network(network_id: str) -> dict:
+        """获取指定网络的完整详情。
+
+        相当于 docker network inspect <network>。
+
+        参数:
+            network_id: 网络 ID 或名称
+
+        返回:
+            网络的完整 attrs 字典
+
+        异常:
+            RuntimeError: 网络不存在时抛出
+        """
         client = get_docker_client_safe()
         try:
             return client.networks.get(network_id).attrs
@@ -325,13 +664,35 @@ def register_all_tools(server: FastMCP) -> None:
         finally:
             client.close()
 
-    # ==================== 卷工具 ====================
+    # ================================================================
+    # 卷工具（Volume Tools）
+    # 提供 Docker 卷的管理：列出、查看、删除。
+    # ================================================================
 
     @server.tool(description="列出所有 Docker 卷，含使用状态。")
     def list_volumes() -> list[dict]:
+        """列出所有 Docker 卷及其使用状态。
+
+        返回每个卷的基本信息，同时标记哪些卷正在被容器使用。
+        "in_use" 字段帮助 AI 助手判断哪些卷可以安全删除。
+
+        使用状态检测：
+            通过检查所有容器的 Mounts 配置，收集被 volume 类型挂载使用的卷名。
+
+        返回:
+            卷信息字典列表，每个包含：
+            - id: 卷 ID
+            - name: 卷名称
+            - driver: 卷驱动（通常为 "local"）
+            - created: 创建时间
+            - mountpoint: 宿主机上的挂载路径
+            - labels: 卷标签
+            - in_use: 是否至少有一个容器挂载此卷
+        """
         client = get_docker_client_safe()
         try:
             volumes = client.volumes.list()
+            # 收集所有容器使用的卷名，用于计算 in_use 字段
             containers = client.containers.list(all=True)
             used_volume_names: set[str] = set()
             for c in containers:
@@ -357,16 +718,31 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="通过 ID 或名称获取指定卷的详细信息。")
     def get_volume(volume_id: str) -> dict:
+        """获取指定卷的完整详情，包含使用它的容器列表。
+
+        参数:
+            volume_id: 卷 ID 或名称
+
+        返回:
+            卷完整信息字典，在标准 attrs 基础上增加了：
+            - in_use: 是否被使用
+            - used_by_containers: 使用此卷的容器名称列表
+
+        异常:
+            RuntimeError: 卷不存在时抛出
+        """
         client = get_docker_client_safe()
         try:
             volume = client.volumes.get(volume_id)
+            # 查找所有使用此卷的容器
             containers = client.containers.list(all=True)
             used_by: list[str] = []
             for c in containers:
                 for m in c.attrs.get("Mounts", []):
                     if m.get("Type") == "volume" and m.get("Name") == volume.name:
                         used_by.append(c.name)
-                        break
+                        break  # 每个容器只添加一次
+
             data = dict(volume.attrs)
             data["in_use"] = len(used_by) > 0
             data["used_by_containers"] = used_by
@@ -378,6 +754,26 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="删除一个 Docker 卷。")
     def remove_volume(volume_id: str, force: bool = False) -> dict:
+        """删除一个 Docker 卷。
+
+        相当于 docker volume rm <volume>。
+
+        参数:
+            volume_id: 卷 ID 或名称
+            force: True=强制删除（即使卷正在使用），默认为 False
+
+        返回:
+            {"status": "success", "message": "卷 xxx 已删除"}
+
+        异常:
+            RuntimeError("未找到卷"): 卷不存在
+            RuntimeError("卷正在使用中"): 卷被容器挂载且未使用 force=True
+            RuntimeError("Docker API 错误"): 其他引擎错误
+
+        安全注意事项:
+            - 删除卷会永久删除其中的数据，不可恢复
+            - 建议先通过 get_volume() 确认 used_by_containers 列表
+        """
         client = get_docker_client_safe()
         try:
             volume = client.volumes.get(volume_id)
@@ -389,19 +785,42 @@ def register_all_tools(server: FastMCP) -> None:
         except docker.errors.NotFound:
             raise RuntimeError(f"未找到卷：{volume_id}")
         except docker.errors.APIError as e:
+            # 区分"卷正在使用"和其他 API 错误
             if "in use" in str(e).lower():
                 raise RuntimeError(f"卷正在使用中：{e}")
             raise RuntimeError(f"Docker API 错误：{e}")
         finally:
             client.close()
 
-    # ==================== 系统工具 ====================
+    # ================================================================
+    # 系统工具（System Tools）
+    # 提供系统级别的信息查询：Docker 统计、Git 版本、系统资源、Compose 项目。
+    # ================================================================
 
     @server.tool(description="获取聚合系统信息，包括 Docker 统计、Git 版本和系统资源。")
     def get_system_info() -> dict:
+        """获取聚合系统信息。
+
+        一次性返回三类信息，方便 AI 助手快速了解环境全貌：
+        1. Docker 统计（容器数量、镜像数量、运行状态）
+        2. Git 版本（分支、commit、作者、日期）
+        3. 系统资源（CPU、内存使用情况）
+
+        返回:
+            {
+                "docker": {"containers": {"total": N, "running": N, "stopped": N}, "images": N},
+                "git": {"branch": "...", "commit_hash": "...", ...},
+                "system": {"cpu": {...}, "memory": {...}}
+            }
+
+        容错设计:
+            每类信息独立采集。如果某类信息获取失败（如不在 git 仓库中），
+            对应的键值会是 {"error": "错误描述"}，不会影响其他信息的返回。
+        """
         result: dict = {}
 
-        # Docker 统计
+        # ---- Docker 统计 ----
+        # 统计容器总数、运行数、停止数、镜像数
         try:
             client = get_docker_client_safe()
             containers = client.containers.list(all=True)
@@ -419,11 +838,14 @@ def register_all_tools(server: FastMCP) -> None:
         except Exception as e:
             result["docker"] = {"error": str(e)}
 
-        # Git 版本
+        # ---- Git 版本 ----
+        # 获取当前代码的 Git 版本信息
+        # search_parent_directories=False: 只查找当前目录是否为 git 仓库
+        # 避免在挂载的主机文件系统中意外搜索到其他 git 仓库
         try:
             repo = git.Repo(os.getcwd(), search_parent_directories=False)
             head = repo.head.commit
-            branch = "detached"
+            branch = "detached"  # 默认值：HEAD 处于 detached 状态
             if not repo.head.is_detached:
                 branch = repo.active_branch.name
             result["git"] = {
@@ -437,7 +859,9 @@ def register_all_tools(server: FastMCP) -> None:
         except Exception:
             result["git"] = {"error": "无法获取 git 信息"}
 
-        # 系统资源
+        # ---- 系统资源 ----
+        # CPU 使用率（interval=1 采样 1 秒获得准确值）
+        # 内存总量、可用量、使用量、使用百分比
         try:
             cpu_percent = psutil.cpu_percent(interval=1)
             mem = psutil.virtual_memory()
@@ -460,14 +884,42 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="获取系统资源使用情况（CPU、内存、磁盘、GPU）。")
     def get_system_usage() -> dict:
+        """获取实时系统资源使用情况。
+
+        提供详细的资源使用数据，包括磁盘分区和 GPU 信息。
+        与 get_system_info 的区别：
+        - get_system_info: 聚合概览（Docker + Git + 系统）
+        - get_system_usage: 详细资源数据（磁盘、GPU）
+
+        返回:
+            {
+                "cpu": {"percent": 整体使用率, "count": 核心数},
+                "memory": {"total": ..., "available": ..., "used": ..., "percent": ...},
+                "disk": [{"device": ..., "mountpoint": ..., "total": ..., "used": ..., "free": ..., "percent": ...}],
+                "gpu": [{"id": ..., "name": ..., "load": ..., "memory_total": ..., "temperature": ...}]
+            }
+
+        磁盘检测策略:
+            - 如果设置了 HOST_FILESYSTEM_ROOT 且不为 "/"：只报告该路径的使用情况
+            - 否则：遍历所有磁盘分区（过滤 loop 和 snap 设备）
+            - 跳过无权限访问的分区
+
+        GPU 检测:
+            - 需要安装 GPUtil（pip install gputil）
+            - 未安装时返回空列表，不影响其他数据
+        """
+        # ---- CPU ----
+        # interval=1: 采样 1 秒获得准确的 CPU 使用率
         cpu_percent = psutil.cpu_percent(interval=1)
         mem = psutil.virtual_memory()
 
-        # 磁盘
+        # ---- 磁盘 ----
         disks: list[dict] = []
         host_fs = os.getenv("HOST_FILESYSTEM_ROOT", "/")
         try:
             if host_fs != "/" and os.path.exists(host_fs):
+                # 容器化环境：通常 HOST_FILESYSTEM_ROOT=/hostfs
+                # 只报告宿主文件系统使用情况
                 usage = psutil.disk_usage(host_fs)
                 disks.append(
                     {
@@ -480,8 +932,10 @@ def register_all_tools(server: FastMCP) -> None:
                     }
                 )
             else:
+                # 非容器化环境：遍历所有分区
                 for partition in psutil.disk_partitions():
                     try:
+                        # 过滤虚拟设备
                         if "loop" in partition.device or "snap" in partition.mountpoint:
                             continue
                         usage = psutil.disk_usage(partition.mountpoint)
@@ -497,11 +951,14 @@ def register_all_tools(server: FastMCP) -> None:
                             }
                         )
                     except (PermissionError, OSError):
+                        # 跳过无权限访问的分区（如 /run/user/1000/doc）
                         continue
         except Exception:
-            pass
+            pass  # 磁盘信息获取失败不影响其他信息
 
-        # GPU
+        # ---- GPU ----
+        # GPUtil 提供 NVIDIA GPU 监控（通过 nvidia-smi）
+        # 如果没有 NVIDIA GPU 或未安装驱动，GPUtil.getGPUs() 返回空列表
         gpus: list[dict] = []
         if GPUtil:
             try:
@@ -510,11 +967,11 @@ def register_all_tools(server: FastMCP) -> None:
                         {
                             "id": gpu.id,
                             "name": gpu.name,
-                            "load": gpu.load * 100,
-                            "memory_total": gpu.memoryTotal,
-                            "memory_used": gpu.memoryUsed,
-                            "memory_free": gpu.memoryFree,
-                            "temperature": gpu.temperature,
+                            "load": gpu.load * 100,  # 转换为百分比（原始值 0-1）
+                            "memory_total": gpu.memoryTotal,  # MB
+                            "memory_used": gpu.memoryUsed,  # MB
+                            "memory_free": gpu.memoryFree,  # MB
+                            "temperature": gpu.temperature,  # 摄氏度
                         }
                     )
             except Exception:
@@ -534,6 +991,23 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="列出所有 Docker Compose 项目（堆栈）及其容器数量。")
     def list_stacks() -> list[dict]:
+        """列出所有 Docker Compose 项目（堆栈）。
+
+        通过检查容器的 com.docker.compose.project 标签来识别 Compose 项目。
+        相当于 docker compose ls。
+
+        工作原理:
+            遍历所有容器的 labels，收集 "com.docker.compose.project" 标签的值，
+            按项目名分组统计容器数量。
+
+        返回:
+            [{"name": "项目名", "container_count": N}, ...]
+            按项目名称字母顺序排序
+
+        局限性:
+            仅检测通过 docker compose 启动的容器（带有特定 label），
+            Docker Swarm 项目使用不同的标签（见 get_stack_containers）。
+        """
         client = get_docker_client_safe()
         try:
             containers = client.containers.list(all=True)
@@ -551,15 +1025,36 @@ def register_all_tools(server: FastMCP) -> None:
 
     @server.tool(description="获取属于指定堆栈的所有容器。")
     def get_stack_containers(stack_name: str) -> list[dict]:
+        """获取指定 Docker Compose 项目的所有容器。
+
+        参数:
+            stack_name: Compose 项目名称（即 docker-compose.yml 中
+                        的 COMPOSE_PROJECT_NAME 或目录名）
+
+        返回:
+            容器摘要信息列表（与 list_containers(summary=True) 格式相同）
+
+        查找策略（两级回退）：
+        1. 首先查找 com.docker.compose.project={stack_name} 标签的容器
+        2. 如果第一步没找到，尝试 com.docker.stack.namespace={stack_name}
+           （Docker Swarm / docker stack deploy 使用的标签）
+
+        返回格式说明:
+            使用 process_container_summary() 处理每个容器，包含：
+            id, name, image, status, ports, networks, created, labels, is_self
+        """
         client = get_docker_client_safe()
         self_id = get_current_container_id()
         try:
+            # 第 1 步：通过 docker compose 标签查找
             filters = {"label": f"com.docker.compose.project={stack_name}"}
             containers = client.containers.list(all=True, filters=filters)
+
+            # 第 2 步：如果没找到，尝试 docker stack 标签
             if not containers:
-                # 也尝试 Docker Swarm 堆栈标签
                 filters_swarm = {"label": f"com.docker.stack.namespace={stack_name}"}
                 containers = client.containers.list(all=True, filters=filters_swarm)
+
             return [process_container_summary(c, self_id) for c in containers]
         finally:
             client.close()
