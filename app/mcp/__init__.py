@@ -1,0 +1,1 @@
+# Mobile Portainer MCP Server

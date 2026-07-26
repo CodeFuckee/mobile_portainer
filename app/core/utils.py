@@ -1,6 +1,8 @@
 import docker
 from fastapi import HTTPException
 import socket
+import shlex
+import argparse
 from typing import Dict, Any
 
 
@@ -110,3 +112,109 @@ def process_container_summary(container, self_id: str = None) -> Dict[str, Any]:
         "ports_list": ports_list,
         "is_self": is_self,
     }
+
+
+class NoExitArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser 子类，解析失败时抛出 ValueError 而非调用 sys.exit。"""
+
+    def error(self, message):
+        raise ValueError(message)
+
+
+def parse_docker_run_command(cmd: str) -> Dict[str, Any]:
+    """
+    将 docker run 命令字符串解析为 docker-py 参数。
+
+    示例:
+        "docker run -d -p 8080:80 --name my-nginx nginx"
+    """
+    parser = NoExitArgumentParser(add_help=False)
+
+    # 位置参数
+    parser.add_argument("image", nargs="?")
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+
+    # 常用参数
+    parser.add_argument("-d", "--detach", action="store_true")
+    parser.add_argument("--name")
+    parser.add_argument("-p", "--publish", action="append", default=[])
+    parser.add_argument("-v", "--volume", action="append", default=[])
+    parser.add_argument("-e", "--env", action="append", default=[])
+    parser.add_argument("--restart")
+    parser.add_argument("--network")
+    parser.add_argument("-i", "--interactive", action="store_true")
+    parser.add_argument("-t", "--tty", action="store_true")
+    parser.add_argument("--rm", action="store_true")
+    parser.add_argument("--privileged", action="store_true")
+
+    # 预处理：移除 'docker run' 前缀
+    parts = shlex.split(cmd)
+    if not parts:
+        raise ValueError("空命令")
+
+    start_idx = 0
+    if parts[0] == "docker":
+        if len(parts) > 1 and parts[1] == "run":
+            start_idx = 2
+    elif parts[0] == "run":
+        start_idx = 1
+
+    args_parts = parts[start_idx:]
+    if not args_parts:
+        raise ValueError("未提供参数")
+
+    try:
+        args = parser.parse_args(args_parts)
+    except ValueError as e:
+        raise ValueError(f"解析命令失败: {str(e)}")
+
+    if not args.image:
+        raise ValueError("镜像名称为必填项")
+
+    # 构造 docker-py 参数
+    params = {
+        "image": args.image,
+        "command": args.command,
+        "detach": args.detach,
+        "name": args.name,
+        "ports": {},
+        "volumes": [],
+        "environment": {},
+        "network": args.network,
+        "stdin_open": args.interactive,
+        "tty": args.tty,
+        "auto_remove": args.rm,
+        "privileged": args.privileged,
+    }
+
+    if args.restart:
+        params["restart_policy"] = {"Name": args.restart}
+
+    # 处理端口: -p 8080:80 或 -p 80
+    for p in args.publish:
+        if ":" in p:
+            parts = p.split(":")
+            if len(parts) == 2:
+                host_port, container_port = parts
+                params["ports"][f"{container_port}/tcp"] = int(host_port)
+            elif len(parts) == 3:
+                # ip:host_port:container_port
+                ip, host_port, container_port = parts
+                params["ports"][f"{container_port}/tcp"] = (ip, int(host_port))
+        else:
+            # 容器端口（随机主机端口）
+            params["ports"][f"{p}/tcp"] = None
+
+    # 处理卷: -v /host:/container
+    params["volumes"] = args.volume
+
+    # 处理环境变量: -e KEY=VAL
+    for e in args.env:
+        if "=" in e:
+            k, v = e.split("=", 1)
+            params["environment"][k] = v
+        else:
+            # -e KEY（从宿主机透传？这里不支持，跳过或警告）
+            pass
+
+    return params

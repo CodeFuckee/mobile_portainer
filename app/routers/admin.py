@@ -161,6 +161,18 @@ def send_email_to_users(data: SendEmailRequest, db: Session = Depends(get_db)):
     return {"message": "邮件发送成功", "recipient_count": len(data.recipients)}
 
 
+@router.post("/email/test", dependencies=[Depends(get_api_key)])
+def send_test_email_to_users(data: SendEmailRequest, db: Session = Depends(get_db)):
+    """向指定收件人发送文本或 HTML 邮件。"""
+    try:
+        send_email(data.recipients, data.subject, data.text_body, data.html_body, db=db)
+    except EmailConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except EmailDeliveryError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"message": "邮件发送成功", "recipient_count": len(data.recipients)}
+
+
 @router.get("/keys", dependencies=[Depends(get_api_key)])
 def list_keys(db: Session = Depends(get_db)):
     result = db.query(APIKeyModel).all()
