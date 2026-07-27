@@ -52,11 +52,13 @@ pytest:
     - linux
     - docker
   script:
+    - echo "=== 创建虚拟环境 ==="
+    - python3 -m venv .venv
     - echo "=== 安装测试依赖 ==="
-    - pip install -r requirements.txt -i ${PIP_INDEX_URL} -q
-    - pip install -r requirements-dev.txt -i ${PIP_INDEX_URL} -q
+    - .venv/bin/pip install -r requirements.txt -i ${PIP_INDEX_URL} -q
+    - .venv/bin/pip install -r requirements-dev.txt -i ${PIP_INDEX_URL} -q
     - echo "=== 运行 pytest ==="
-    - python3 -m pytest tests/ -v --tb=short
+    - .venv/bin/python -m pytest tests/ -v --tb=short
   coverage: '/TOTAL.*\s+(\d+%)$/'
 
 # ================================================================
