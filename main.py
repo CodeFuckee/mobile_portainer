@@ -21,7 +21,12 @@ from app.routers import (
     docker_proxy,
 )
 from app.core.config import DOCKER_ENGINE_API_ENABLED
-from app.mcp.http_server import mcp_http_app, mcp_session_manager
+from app.mcp.http_server import (
+    mcp_http_app,
+    mcp_session_manager,
+    mcp_oauth_routes,
+    mcp_protected_resource_routes,
+)
 
 # Initialize Database
 Base.metadata.create_all(bind=engine)
@@ -135,7 +140,12 @@ if DOCKER_ENGINE_API_ENABLED:
 # 挂载静态文件目录（用于头像等上传文件访问）
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# 挂载 MCP Streamable HTTP 端点
+# 注册 OAuth 路由（必须在根路径，先于 MCP mount）
+# MCP 客户端按 RFC 8414 规范在服务根路径发现 OAuth 端点
+for route in mcp_oauth_routes + mcp_protected_resource_routes:
+    app.router.routes.append(route)
+
+# 挂载 MCP Streamable HTTP 端点（MCP 协议端点，需要 Bearer token 认证）
 app.mount("/mcp", mcp_http_app)
 
 

@@ -41,3 +41,7 @@ SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Mobile Portainer")
 SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
 SMTP_USE_STARTTLS = os.getenv("SMTP_USE_STARTTLS", "true").lower() == "true"
 SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "10"))
+
+# --- MCP OAuth 认证 ---
+MCP_AUTH_ENABLED = os.getenv("MCP_AUTH_ENABLED", "true").lower() == "true"
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://127.0.0.1:8000")

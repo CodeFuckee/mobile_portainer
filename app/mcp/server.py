@@ -15,6 +15,20 @@ stdio 模式：
 如需 HTTP 模式（远程访问），请使用 app.mcp.http_server，
 它会自动挂载到 FastAPI 的 /mcp 路径。
 
+=== 认证模式 ===
+
+HTTP 模式下支持两种认证方式（通过 MCP_AUTH_ENABLED 环境变量控制）：
+
+1. OAuth 2.0 模式（MCP_AUTH_ENABLED=true，默认）：
+   - 完整的 OAuth 2.0 授权码流程 + PKCE
+   - 动态客户端注册（DCR），持久化到 SQLite
+   - 所有 Token 持久化存储，服务重启不丢失
+   - API Key 可直接作为 Bearer token 使用（向后兼容）
+
+2. 无认证模式（MCP_AUTH_ENABLED=false）：
+   - MCP 端点无任何鉴权
+   - 适用于开发环境或内网部署
+
 === 启动方式 ===
 
 直接运行：
@@ -39,12 +53,25 @@ stdio 模式：
       }
     }
 
-HTTP 模式：
+HTTP 模式（OAuth）：
     {
       "mcpServers": {
         "mobile-portainer": {
           "type": "http",
           "url": "https://your-server:8000/mcp"
+        }
+      }
+    }
+
+HTTP 模式（API Key，不走 OAuth）：
+    {
+      "mcpServers": {
+        "mobile-portainer": {
+          "type": "http",
+          "url": "https://your-server:8000/mcp",
+          "headers": {
+            "Authorization": "Bearer ${MOBILE_PORTAINER_API_KEY}"
+          }
         }
       }
     }
@@ -57,9 +84,14 @@ HTTP 模式：
 """
 
 import logging
+import os
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 
+from app.core.config import MCP_AUTH_ENABLED, PUBLIC_BASE_URL
+from app.db.database import SessionLocal
+from .auth_provider import DatabaseOAuthProvider
 from .helpers import get_docker_client_safe
 from .tools import register_all_tools
 
@@ -69,9 +101,34 @@ logger = logging.getLogger("mcp.portainer")
 logger.setLevel(logging.INFO)
 
 # ---- 创建 FastMCP 实例 ----
-# "mobile-portainer" 是服务名称，会出现在 MCP 协议的 initialize 响应中
-# 客户端通过此名称识别服务
-app = FastMCP("mobile-portainer")
+# 根据 MCP_AUTH_ENABLED 环境变量决定是否启用 OAuth 认证
+if MCP_AUTH_ENABLED:
+    logger.info("MCP OAuth 认证已启用，issuer_url=%s/mcp", PUBLIC_BASE_URL)
+
+    auth_provider = DatabaseOAuthProvider(
+        session_factory=SessionLocal,
+        api_key=os.environ.get("MOBILE_PORTAINER_API_KEY"),
+    )
+
+    app = FastMCP(
+        "mobile-portainer",
+        auth_server_provider=auth_provider,
+        auth=AuthSettings(
+            # issuer_url 必须在根路径，因为 MCP 客户端按 RFC 8414 规范
+            # 在服务根路径（netloc）发现 OAuth 端点，而不是在 /mcp 子路径下
+            issuer_url=f"{PUBLIC_BASE_URL}",
+            # resource_server_url 指向实际的 MCP 协议端点路径
+            resource_server_url=f"{PUBLIC_BASE_URL}/mcp",
+            client_registration_options=ClientRegistrationOptions(
+                enabled=True,
+                client_secret_expiry_seconds=None,  # 客户端密钥永不过期
+            ),
+            required_scopes=[],
+        ),
+    )
+else:
+    logger.info("MCP OAuth 认证已禁用")
+    app = FastMCP("mobile-portainer")
 
 # ---- 注册所有 Docker 管理工具 ----
 # 将 tools.py 中定义的 24 个工具函数注册到 MCP Server
