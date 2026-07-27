@@ -51,14 +51,50 @@ pytest:
   tags:
     - linux
     - docker
+  timeout: 10m
+  cache:
+    key: pip-cache-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .pip-cache/
+    policy: pull-push
   script:
-    - echo "=== 创建虚拟环境 ==="
-    - python3 -m venv .venv
-    - echo "=== 安装测试依赖 ==="
-    - .venv/bin/pip install -r requirements.txt -i ${PIP_INDEX_URL} -q
-    - .venv/bin/pip install -r requirements-dev.txt -i ${PIP_INDEX_URL} -q
-    - echo "=== 运行 pytest ==="
-    - .venv/bin/python -m pytest tests/ -v --tb=short
+    - |
+      set -e
+      echo "=== 1. 创建虚拟环境 ==="
+
+      # 确保 venv 模块可用（Debian/Ubuntu 可能需要安装 python3-venv）
+      if ! python3 -m venv --help >/dev/null 2>&1; then
+        echo "venv 模块不可用，尝试安装 python3-venv ..."
+        sudo apt-get update -qq && sudo apt-get install -y -qq python3-venv || true
+        pip install virtualenv -q 2>/dev/null || true
+      fi
+
+      # 尝试创建虚拟环境
+      if python3 -m venv --help >/dev/null 2>&1; then
+        echo "使用 venv 模块创建虚拟环境 ..."
+        python3 -m venv .venv
+        PIP=".venv/bin/pip"
+        PYTHON=".venv/bin/python"
+      else
+        echo "使用 virtualenv 创建虚拟环境 ..."
+        pip install virtualenv -q
+        python3 -m virtualenv .venv
+        PIP=".venv/bin/pip"
+        PYTHON=".venv/bin/python"
+      fi
+
+      echo "=== 2. 升级 pip ==="
+      $PIP install --upgrade pip -i ${PIP_INDEX_URL} --cache-dir .pip-cache/
+
+      echo "=== 3. 安装项目依赖 ==="
+      $PIP install -r requirements.txt -i ${PIP_INDEX_URL} --cache-dir .pip-cache/
+      $PIP install -r requirements-dev.txt -i ${PIP_INDEX_URL} --cache-dir .pip-cache/
+
+      echo "=== 4. 确认已安装的包 ==="
+      $PIP list | grep -E "pytest|httpx|fastapi|sqlalchemy|docker"
+
+      echo "=== 5. 运行 pytest ==="
+      $PYTHON -m pytest tests/ -v --tb=short
   coverage: '/TOTAL.*\s+(\d+%)$/'
 
 # ================================================================
