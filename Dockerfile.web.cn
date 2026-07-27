@@ -1,4 +1,5 @@
-FROM docker.1ms.run/nginx:alpine
+ARG BASE_IMAGE=docker.1ms.run/nginx:alpine
+FROM ${BASE_IMAGE}
 
 RUN apk add --no-cache wget unzip
 
@@ -6,7 +7,7 @@ ARG GITHUB_REPO=CodeFuckee/mobile_portainer_flutter_module
 # 下载源，默认 github.com（国内用户可构建时覆盖为镜像站）
 ARG DOWNLOAD_BASE=https://github.com
 
-RUN wget -O /tmp/web-build.zip \
+RUN wget --tries=3 --timeout=30 -O /tmp/web-build.zip \
     "${DOWNLOAD_BASE}/${GITHUB_REPO}/releases/latest/download/web-build.zip" && \
     unzip -o /tmp/web-build.zip -d /usr/share/nginx/html && \
     rm /tmp/web-build.zip

@@ -109,24 +109,45 @@ build_images:
   needs:
     - job: pytest
   script:
-    - echo "=== 1. 构建 API 镜像（使用 Dockerfile.cn） ==="
+    - echo "=== 1. 预拉取基础镜像（带重试） ==="
+    - |
+      retry_pull() {
+        local image=$1
+        local max_retries=3
+        local count=0
+        until docker pull "$image" 2>&1; do
+          count=$((count + 1))
+          if [ $count -ge $max_retries ]; then
+            echo "错误：无法拉取镜像 $image，已重试 $max_retries 次"
+            return 1
+          fi
+          echo "拉取 $image 失败，${count}/${max_retries} 次重试，等待 5 秒..."
+          sleep 5
+        done
+        echo "成功拉取 $image"
+      }
+    - retry_pull "docker.1ms.run/python:3.11-slim" || echo "警告：预拉取 python 基础镜像失败"
+    - retry_pull "docker.1ms.run/nginx:alpine" || echo "警告：预拉取 nginx 基础镜像失败"
+    - echo "=== 2. 构建 API 镜像（使用 Dockerfile.cn） ==="
     - |
       docker build \
+        --progress=plain \
         -f Dockerfile.cn \
         -t ${API_IMAGE_NAME}:${IMAGE_TAG} \
         -t ${API_IMAGE_NAME}:latest \
         .
-    - echo "=== 2. 构建 Web 镜像（使用 Dockerfile.web.cn） ==="
+    - echo "=== 3. 构建 Web 镜像（使用 Dockerfile.web.cn） ==="
     - |
       docker build \
+        --progress=plain \
         -f Dockerfile.web.cn \
         -t ${WEB_IMAGE_NAME}:${IMAGE_TAG} \
         -t ${WEB_IMAGE_NAME}:latest \
         .
-    - echo "=== 3. 镜像列表 ==="
+    - echo "=== 4. 镜像列表 ==="
     - docker images | grep mobile_portainer
   after_script:
-    - echo "构建完成，镜像标签"
+    - echo "构建完成，镜像标签: ${API_IMAGE_NAME}:${IMAGE_TAG}, ${WEB_IMAGE_NAME}:${IMAGE_TAG}"
 
 # ================================================================
 # deploy —— 部署到目标服务器

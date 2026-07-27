@@ -1,5 +1,6 @@
-# 使用官方 Python 轻量级镜像
-FROM docker.1ms.run/python:3.11-slim
+# 使用官方 Python 轻量级镜像（可通过 --build-arg 覆盖）
+ARG BASE_IMAGE=docker.1ms.run/python:3.11-slim
+FROM ${BASE_IMAGE}
 
 # 设置工作目录
 WORKDIR /app
@@ -7,9 +8,11 @@ WORKDIR /app
 # 复制依赖文件
 COPY requirements.txt .
 
-# 安装依赖
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir -r requirements.txt
+# 安装依赖（带重试，应对网络抖动）
+RUN apt-get update --fix-missing \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir --retries 5 -r requirements.txt
 
 # 复制应用代码
 COPY . .
