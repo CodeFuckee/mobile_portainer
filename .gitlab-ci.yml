@@ -4,7 +4,7 @@ stages:
   - deploy
 
 variables:
-  GIT_CLEAN_FLAGS: none
+  GIT_CLEAN_FLAGS: "none"
 
   # ================================================================
   # 镜像 / 注册表地址（Dockerfile.cn 中硬编码了基础镜像，此处仅作文档参考）
@@ -87,8 +87,7 @@ build_images:
         .
     - echo "=== 3. 镜像列表 ==="
     - docker images | grep mobile_portainer
-  after_script:
-    - echo "构建完成，镜像标签: ${IMAGE_TAG}"
+  after_script: echo "构建完成，镜像标签: ${IMAGE_TAG}"
 
 # ================================================================
 # deploy —— 部署到目标服务器
