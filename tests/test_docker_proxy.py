@@ -43,9 +43,9 @@ class TestDockerProxyAuth:
     """测试代理路由的认证要求。"""
 
     def test_proxy_requires_auth(self, client):
-        """无认证头时返回 403。"""
+        """无认证头时返回 401。"""
         response = client.get("/v1.45/info")
-        assert response.status_code == 403
+        assert response.status_code == 401
 
     def test_proxy_with_admin_credentials(self, client, admin_headers):
         """Admin 凭据可通过认证并成功转发。"""

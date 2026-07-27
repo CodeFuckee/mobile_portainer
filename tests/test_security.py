@@ -3,15 +3,15 @@ from app.db.models import APIKeyModel
 
 
 class TestAPIAuthentication:
-    def test_missing_api_key_returns_403(self, client):
-        """缺少 X-API-Key 请求头时应返回 403。"""
+    def test_missing_api_key_returns_401(self, client):
+        """缺少 X-API-Key 请求头时应返回 401。"""
         response = client.get("/containers")
-        assert response.status_code == 403
+        assert response.status_code == 401
 
-    def test_invalid_api_key_returns_403(self, client):
-        """无效的 API Key 应返回 403。"""
+    def test_invalid_api_key_returns_401(self, client):
+        """无效的 API Key 应返回 401。"""
         response = client.get("/containers", headers={"X-API-Key": "invalid-key"})
-        assert response.status_code == 403
+        assert response.status_code == 401
 
     def test_valid_api_key_passes_auth(self, client, db_session):
         """有效的 API Key 应通过认证。"""
@@ -19,9 +19,9 @@ class TestAPIAuthentication:
         db_session.add(APIKeyModel(key=key_str, note="测试"))
         db_session.commit()
 
-        # 由于没有 Docker daemon，请求可能返回 500（连接失败），但不会是 403
+        # 由于没有 Docker daemon，请求可能返回 500（连接失败），但不会是 401 或 403
         response = client.get("/containers", headers={"X-API-Key": key_str})
-        assert response.status_code != 403
+        assert response.status_code not in (401, 403)
 
 
 class TestAdminAuthentication:
