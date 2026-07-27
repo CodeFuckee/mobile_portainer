@@ -87,7 +87,8 @@ build_images:
         .
     - echo "=== 3. 镜像列表 ==="
     - docker images | grep mobile_portainer
-  after_script: echo "构建完成，镜像标签: ${IMAGE_TAG}"
+  after_script:
+    - echo "构建完成，镜像标签"
 
 # ================================================================
 # deploy —— 部署到目标服务器
