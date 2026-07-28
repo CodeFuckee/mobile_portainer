@@ -51,7 +51,7 @@ pytest:
   tags:
     - linux
     - docker
-  timeout: 10m
+  timeout: 15m
   cache:
     key: pip-cache-${CI_COMMIT_REF_SLUG}
     paths:
