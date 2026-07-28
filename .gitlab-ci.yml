@@ -7,7 +7,7 @@ variables:
   GIT_CLEAN_FLAGS: "none"
 
   # ================================================================
-  # 镜像 / 注册表地址（Dockerfile.cn 中硬编码了基础镜像，此处仅作文档参考）
+  # 镜像 / 注册表地址
   # ================================================================
   PIP_INDEX_URL: "https://pypi.tuna.tsinghua.edu.cn/simple"
 
@@ -17,12 +17,6 @@ variables:
   API_IMAGE_NAME: "mobile_portainer-api"
   WEB_IMAGE_NAME: "mobile_portainer-web"
   IMAGE_TAG: "${CI_COMMIT_SHORT_SHA}"
-
-  # ================================================================
-  # 构建参数（国内镜像源，可在 GitLab UI 中覆盖）
-  # ================================================================
-  # GitHub 下载镜像（用于下载 web-build.zip）
-  WEB_DOWNLOAD_BASE: "https://github.com"
 
   # ================================================================
   # 部署变量 —— 可在 GitLab UI 中覆盖
@@ -105,6 +99,12 @@ pytest:
 
 # ================================================================
 # build —— 构建 Docker 镜像
+#
+# 使用 DOCKER_BUILDKIT=0 强制使用传统构建器（而非 BuildKit），
+# 原因：BuildKit 在某些 NAS 环境（特别是使用 containerd 镜像
+# 存储时）无法看到 classic docker pull 预拉取的镜像，导致构建
+# 在解析基础镜像阶段挂起直到被 SIGKILL。传统构建器与 docker
+# pull 共享同一个镜像存储，可以正常使用预拉取的镜像。
 # ================================================================
 build_images:
   extends: .setup
@@ -116,30 +116,32 @@ build_images:
     - job: pytest
   timeout: 20m
   script:
-    - set -e
-    - echo "=== 1. 预拉取基础镜像（经典 Docker 拉取，BuildKit 可用本地缓存） ==="
-    - docker pull docker.1ms.run/python:3.11-slim
-    - docker pull docker.1ms.run/nginx:alpine
-    - echo "=== 2. 构建 API 镜像（使用 Dockerfile.cn） ==="
     - |
-      docker build \
-        --progress=plain \
+      set -e
+      echo "=== 1. 预拉取基础镜像（经典 docker pull） ==="
+      docker pull docker.1ms.run/python:3.11-slim
+      docker pull docker.1ms.run/nginx:alpine
+
+      echo "=== 2. 构建 API 镜像（使用 Dockerfile.cn） ==="
+      echo "   使用传统构建器 DOCKER_BUILDKIT=0"
+      DOCKER_BUILDKIT=0 docker build \
         -f Dockerfile.cn \
         --build-arg PIP_INDEX_URL=${PIP_INDEX_URL} \
         -t ${API_IMAGE_NAME}:${IMAGE_TAG} \
         -t ${API_IMAGE_NAME}:latest \
         .
-    - echo "=== 3. 构建 Web 镜像（使用 Dockerfile.web.cn） ==="
-    - |
-      docker build \
-        --progress=plain \
+
+      echo "=== 3. 构建 Web 镜像（使用 Dockerfile.web.cn） ==="
+      echo "   使用传统构建器 DOCKER_BUILDKIT=0"
+      DOCKER_BUILDKIT=0 docker build \
         -f Dockerfile.web.cn \
-        --build-arg DOWNLOAD_BASE=${WEB_DOWNLOAD_BASE} \
+        --build-arg DOWNLOAD_BASE=${WEB_DOWNLOAD_BASE:-https://github.com} \
         -t ${WEB_IMAGE_NAME}:${IMAGE_TAG} \
         -t ${WEB_IMAGE_NAME}:latest \
         .
-    - echo "=== 4. 镜像列表 ==="
-    - docker images | grep mobile_portainer
+
+      echo "=== 4. 镜像列表 ==="
+      docker images | grep mobile_portainer
   after_script:
     - |
       echo "构建完成"
@@ -229,3 +231,30 @@ deploy:
       echo "=== 3. 清理旧容器 ==="
       $DOCKER stop ${DEPLOY_API_CONTAINER_NAME} 2>/dev/null || true
       $DOCKER rm ${DEPLOY_API_CONTAINER_NAME} 2>/dev/null || true
+
+      echo "=== 4. 启动新容器 ==="
+      $DOCKER run -d \
+        --name ${DEPLOY_API_CONTAINER_NAME} \
+        --network ${DEPLOY_NETWORK} \
+        -p ${DEPLOY_PORT}:8000 \
+        -v ${DEPLOY_DATA_DIR}:/app/data \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v /:/hostfs:ro \
+        --restart unless-stopped \
+        ${API_IMAGE_NAME}:${IMAGE_TAG}
+
+      echo "=== 5. 等待健康检查 ==="
+      for i in $(seq 1 30); do
+        if curl -s http://localhost:${DEPLOY_PORT}/health >/dev/null 2>&1; then
+          echo "✓ 服务健康检查通过"
+          break
+        fi
+        echo "等待第 ${i} 次健康检查..."
+        sleep 2
+      done
+
+      echo ""
+      echo "部署完成！"
+      echo "  API: http://localhost:${DEPLOY_PORT}"
+      echo "  容器: ${DEPLOY_API_CONTAINER_NAME}"
+      echo "  镜像: ${API_IMAGE_NAME}:${IMAGE_TAG}"
