@@ -114,3 +114,23 @@ class OAuthTokenModel(Base):
     resource = Column(String, nullable=True)
     subject = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ProjectModel(Base):
+    """Docker 项目管理 — 关联 Dockerfile / docker-compose.yaml 构建与部署。"""
+
+    __tablename__ = "projects"
+
+    id = Column(
+        String,
+        primary_key=True,
+        index=True,
+        default=lambda: f"proj_{uuid.uuid4().hex[:12]}",
+    )
+    name = Column(String, unique=True, index=True, nullable=False)
+    description = Column(String, nullable=True)
+    status = Column(
+        String, default="idle", nullable=False
+    )  # idle | building | running | failed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

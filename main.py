@@ -19,6 +19,7 @@ from app.routers import (
     # web_ui,  # 前端已迁移至独立 Flutter Web 服务
     stacks,
     docker_proxy,
+    projects,
 )
 from app.core.config import DOCKER_ENGINE_API_ENABLED
 from app.mcp.http_server import (
@@ -69,6 +70,10 @@ TAGS_METADATA = [
     {"name": "volumes", "description": "数据卷管理 — 创建、删除、查看数据卷"},
     {"name": "networks", "description": "网络管理 — 创建、删除、查看 Docker 网络"},
     {"name": "stacks", "description": "堆栈管理 — Docker Compose 项目容器管理"},
+    {
+        "name": "projects",
+        "description": "项目管理 — Dockerfile 编辑、镜像构建、compose 启停",
+    },
     {
         "name": "system",
         "description": "系统信息 — 主机资源、Docker 信息、可用端口、Git 更新",
@@ -132,6 +137,8 @@ app.include_router(stacks.router)
 app.include_router(system.router)
 app.include_router(admin.router)
 app.include_router(websockets.router)
+app.include_router(projects.router)
+app.include_router(projects.ws_router)
 
 # Docker Engine API 代理（在 API 路由之后、Web UI 之前）
 if DOCKER_ENGINE_API_ENABLED:

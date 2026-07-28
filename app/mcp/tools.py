@@ -1,12 +1,12 @@
 """
 MCP 工具定义 — Docker 资源管理工具集。
 
-通过 register_all_tools(server) 将 24 个 Docker 管理工具注册到 MCP Server。
+通过 register_all_tools(server) 将 33 个 Docker 管理工具注册到 MCP Server。
 这些工具被 AI 助手（如 Claude）通过 MCP 协议调用，实现对 Docker 资源的声明式管理。
 
 === 工具分组 ===
 
-本模块定义了 5 组共 24 个工具：
+本模块定义了 6 组共 33 个工具：
 
 【容器工具 — 11 个】
   list_containers     — 列出所有容器（支持摘要模式）
@@ -42,6 +42,17 @@ MCP 工具定义 — Docker 资源管理工具集。
   list_stacks           — 列出 Docker Compose 项目
   get_stack_containers  — 获取指定 Compose 项目的所有容器
 
+【项目工具 — 9 个】
+  list_projects       — 列出所有项目
+  get_project         — 获取项目详情
+  create_project      — 创建项目（自动生成 Dockerfile + docker-compose.yaml）
+  delete_project      — 删除项目（清理文件 + compose down）
+  get_project_file    — 读取项目 Dockerfile 或 docker-compose.yaml
+  update_project_file — 更新项目 Dockerfile 或 docker-compose.yaml
+  build_project       — 触发 Docker 镜像构建（同步模式，返回构建日志）
+  project_up          — 启动项目容器（docker compose up）
+  project_down        — 停止项目容器（docker compose down）
+
 === 工具函数设计规范 ===
 
 每个工具函数遵循统一的设计模式：
@@ -60,6 +71,10 @@ MCP 工具定义 — Docker 资源管理工具集。
 """
 
 import os
+import pathlib
+import shutil
+import subprocess
+import uuid
 from datetime import datetime
 
 import docker
@@ -67,11 +82,13 @@ import git
 import psutil
 from mcp.server.fastmcp import FastMCP
 
+from app.core.config import PROJECTS_DIR
 from app.core.utils import (
     get_current_container_id,
     parse_docker_run_command,
     process_container_summary,
 )
+from app.db.models import ProjectModel
 
 from .helpers import get_docker_client_safe, get_db_session
 
@@ -1058,3 +1075,547 @@ def register_all_tools(server: FastMCP) -> None:
             return [process_container_summary(c, self_id) for c in containers]
         finally:
             client.close()
+
+    # ================================================================
+    # 项目工具（Project Tools）
+    # 提供项目的完整管理：CRUD、文件编辑、镜像构建、compose 启停。
+    # ================================================================
+
+    # -- 默认模板（与 app/routers/projects.py 保持一致）-----------------
+
+    _DEFAULT_DOCKERFILE = """\
+FROM alpine:latest
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制文件（根据需要修改）
+# COPY . .
+
+# 运行命令（根据需要修改）
+# CMD ["echo", "Hello World"]
+"""
+
+    _DEFAULT_COMPOSE_YAML = """\
+version: '3.8'
+
+services:
+  app:
+    build: .
+    # ports:
+    #   - "8080:80"
+    # volumes:
+    #   - ./data:/app/data
+    # environment:
+    #   - NODE_ENV=production
+"""
+
+    # -- 辅助函数 --------------------------------------------------------
+
+    def _project_dir(project_id: str) -> pathlib.Path:
+        """返回项目文件存储目录。"""
+        return pathlib.Path(PROJECTS_DIR) / project_id
+
+    def _model_to_dict(p: ProjectModel) -> dict:
+        """SQLAlchemy 模型 → API 字典。"""
+        return {
+            "id": p.id,
+            "name": p.name,
+            "description": p.description,
+            "status": p.status,
+            "createdAt": p.created_at.isoformat() if p.created_at else None,
+            "updatedAt": p.updated_at.isoformat() if p.updated_at else None,
+        }
+
+    # -- 项目 CRUD -------------------------------------------------------
+
+    @server.tool(description="列出所有项目，按更新时间倒序排列。")
+    def list_projects() -> list[dict]:
+        """列出所有项目。
+
+        返回每个项目的基本信息，包括 id、名称、描述、状态和创建/更新时间。
+        项目状态: idle（空闲）| building（构建中）| running（运行中）| failed（失败）。
+
+        返回:
+            项目字典列表，按 updated_at 降序排列。
+        """
+        with get_db_session() as db:
+            projects = (
+                db.query(ProjectModel).order_by(ProjectModel.updated_at.desc()).all()
+            )
+            return [_model_to_dict(p) for p in projects]
+
+    @server.tool(description="通过项目 ID 获取项目详细信息。")
+    def get_project(project_id: str) -> dict:
+        """获取单个项目的完整详情。
+
+        参数:
+            project_id: 项目 ID（如 "proj_a1b2c3d4e5f6"）
+
+        返回:
+            项目完整信息字典（id、name、description、status、时间戳）
+
+        异常:
+            RuntimeError: 项目不存在时抛出
+        """
+        with get_db_session() as db:
+            project = (
+                db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+            )
+            if not project:
+                raise RuntimeError(f"未找到项目：{project_id}")
+            return _model_to_dict(project)
+
+    @server.tool(
+        description="创建新项目，自动生成默认 Dockerfile 和 docker-compose.yaml 模板。"
+    )
+    def create_project(name: str, description: str | None = None) -> dict:
+        """创建新项目。
+
+        创建项目的同时会在文件系统中生成默认的 Dockerfile 和
+        docker-compose.yaml 模板文件，方便用户在此基础上修改。
+
+        参数:
+            name: 项目名称（必须唯一，1-128 字符）
+            description: 项目描述（可选，最多 512 字符）
+
+        返回:
+            新创建的项目信息字典
+
+        异常:
+            RuntimeError: 项目名称已存在或参数无效时抛出
+        """
+        if not name or not name.strip():
+            raise RuntimeError("项目名称为必填项")
+        if len(name) > 128:
+            raise RuntimeError("项目名称不能超过 128 个字符")
+
+        with get_db_session() as db:
+            existing = (
+                db.query(ProjectModel).filter(ProjectModel.name == name.strip()).first()
+            )
+            if existing:
+                raise RuntimeError(f"项目名称已存在：{name}")
+
+            project_id = f"proj_{uuid.uuid4().hex[:12]}"
+            now = datetime.utcnow()
+
+            project = ProjectModel(
+                id=project_id,
+                name=name.strip(),
+                description=description.strip() if description else None,
+                status="idle",
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(project)
+            db.commit()
+            db.refresh(project)
+
+            # ---- 创建项目目录和默认文件 ----
+            project_dir = _project_dir(project_id)
+            project_dir.mkdir(parents=True, exist_ok=True)
+            (project_dir / "Dockerfile").write_text(
+                _DEFAULT_DOCKERFILE, encoding="utf-8"
+            )
+            (project_dir / "docker-compose.yaml").write_text(
+                _DEFAULT_COMPOSE_YAML, encoding="utf-8"
+            )
+
+            return _model_to_dict(project)
+
+    @server.tool(description="删除项目及其关联的所有文件。")
+    def delete_project(project_id: str) -> dict:
+        """删除项目。
+
+        删除操作会同时：
+        1. 尝试停止并移除项目的 compose 容器（docker compose down --volumes）
+        2. 从数据库删除项目记录
+        3. 删除项目目录下的所有文件
+
+        参数:
+            project_id: 项目 ID
+
+        返回:
+            {"status": "deleted"}
+
+        异常:
+            RuntimeError: 项目不存在或正在构建中无法删除时抛出
+        """
+        with get_db_session() as db:
+            project = (
+                db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+            )
+            if not project:
+                raise RuntimeError(f"未找到项目：{project_id}")
+            if project.status == "building":
+                raise RuntimeError("项目正在构建中，无法删除")
+
+            # 尝试 compose down
+            compose_file = _project_dir(project_id) / "docker-compose.yaml"
+            if compose_file.exists():
+                try:
+                    subprocess.run(
+                        [
+                            "docker",
+                            "compose",
+                            "-f",
+                            str(compose_file),
+                            "-p",
+                            f"mp_{project_id}",
+                            "down",
+                            "--volumes",
+                        ],
+                        capture_output=True,
+                        timeout=30,
+                    )
+                except Exception:
+                    pass
+
+            db.delete(project)
+            db.commit()
+
+            # 删除项目目录
+            project_dir = _project_dir(project_id)
+            if project_dir.exists():
+                try:
+                    shutil.rmtree(str(project_dir))
+                except OSError:
+                    pass
+
+        return {"status": "deleted"}
+
+    # -- 文件操作 --------------------------------------------------------
+
+    @server.tool(description="获取项目文件内容（Dockerfile 或 docker-compose.yaml）。")
+    def get_project_file(project_id: str, filename: str) -> dict:
+        """读取项目配置文件的内容。
+
+        参数:
+            project_id: 项目 ID
+            filename: 文件名，必须是 "Dockerfile" 或 "docker-compose.yaml"
+
+        返回:
+            {"filename": "Dockerfile", "content": "文件内容字符串"}
+
+        异常:
+            RuntimeError: 项目不存在、文件名不支持或文件不存在时抛出
+        """
+        allowed = {"Dockerfile", "docker-compose.yaml"}
+        if filename not in allowed:
+            raise RuntimeError(f"不支持的文件名: {filename}，仅支持 {allowed}")
+
+        with get_db_session() as db:
+            project = (
+                db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+            )
+            if not project:
+                raise RuntimeError(f"未找到项目：{project_id}")
+
+        file_path = _project_dir(project_id) / filename
+        if not file_path.exists():
+            raise RuntimeError(f"文件 {filename} 不存在")
+
+        return {
+            "filename": filename,
+            "content": file_path.read_text(encoding="utf-8"),
+        }
+
+    @server.tool(description="更新项目文件内容（Dockerfile 或 docker-compose.yaml）。")
+    def update_project_file(project_id: str, filename: str, content: str) -> dict:
+        """更新项目配置文件的内容。
+
+        参数:
+            project_id: 项目 ID
+            filename: 文件名，必须是 "Dockerfile" 或 "docker-compose.yaml"
+            content: 新的文件内容（完整替换）
+
+        返回:
+            {"filename": "Dockerfile", "status": "saved"}
+
+        异常:
+            RuntimeError: 项目不存在、文件名不支持或 content 为空时抛出
+        """
+        allowed = {"Dockerfile", "docker-compose.yaml"}
+        if filename not in allowed:
+            raise RuntimeError(f"不支持的文件名: {filename}，仅支持 {allowed}")
+        if content is None:
+            raise RuntimeError("content 字段为必填项")
+
+        with get_db_session() as db:
+            project = (
+                db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+            )
+            if not project:
+                raise RuntimeError(f"未找到项目：{project_id}")
+
+            file_path = _project_dir(project_id) / filename
+            file_path.write_text(content, encoding="utf-8")
+            project.updated_at = datetime.utcnow()
+            db.commit()
+
+        return {"filename": filename, "status": "saved"}
+
+    # -- 构建操作 --------------------------------------------------------
+
+    @server.tool(description="触发 Docker 镜像构建（同步模式，返回完整构建日志）。")
+    def build_project(project_id: str) -> dict:
+        """触发 Docker 镜像构建。
+
+        MCP 环境下的构建是同步的——工具会等待构建完成并返回完整日志。
+        这与 HTTP API 的异步+WebSocket 模式不同。
+
+        构建过程:
+        1. 检查 Dockerfile 是否存在且非空
+        2. 更新项目状态为 building
+        3. 执行 docker build
+        4. 构建成功 → 状态设为 idle
+        5. 构建失败 → 状态设为 failed
+
+        参数:
+            project_id: 项目 ID
+
+        返回:
+            {
+                "status": "success" | "failed",
+                "imageId": "构建成功后的镜像 ID（失败时为 None）",
+                "logs": ["逐行构建日志", ...]
+            }
+
+        异常:
+            RuntimeError: 项目不存在、正在构建中、Dockerfile 问题
+        """
+        project_dir = _project_dir(project_id)
+
+        with get_db_session() as db:
+            project = (
+                db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+            )
+            if not project:
+                raise RuntimeError(f"未找到项目：{project_id}")
+            if project.status == "building":
+                raise RuntimeError("项目正在构建中")
+
+            # 检查 Dockerfile
+            dockerfile_path = project_dir / "Dockerfile"
+            if not dockerfile_path.exists():
+                raise RuntimeError("Dockerfile 不存在")
+            if not dockerfile_path.read_text(encoding="utf-8").strip():
+                raise RuntimeError("Dockerfile 为空")
+
+            # 更新状态为 building
+            project.status = "building"
+            project.updated_at = datetime.utcnow()
+            db.commit()
+
+        client = get_docker_client_safe()
+        logs: list[str] = []
+        image_id: str | None = None
+        build_success = False
+
+        try:
+            for chunk in client.api.build(
+                path=str(project_dir),
+                dockerfile="Dockerfile",
+                tag=f"mobile_portainer_proj_{project_id}:latest",
+                rm=True,
+                decode=True,
+            ):
+                if "stream" in chunk:
+                    logs.append(chunk["stream"].rstrip("\n"))
+                elif "status" in chunk:
+                    logs.append(f"[STATUS] {chunk['status']}")
+                elif "error" in chunk:
+                    logs.append(f"[ERROR] {chunk['error']}")
+                elif "message" in chunk:
+                    logs.append(f"[ERROR] {chunk['message']}")
+
+            # 构建成功（没有抛出异常）
+            build_success = True
+            # 尝试从最新的镜像中获取 ID
+            try:
+                img = client.images.get(f"mobile_portainer_proj_{project_id}:latest")
+                image_id = img.id
+            except Exception:
+                pass
+        except Exception as exc:
+            logs.append(f"[ERROR] 构建失败: {exc}")
+            build_success = False
+        finally:
+            client.close()
+
+        # 更新最终状态
+        with get_db_session() as db:
+            project = (
+                db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+            )
+            if project:
+                project.status = "idle" if build_success else "failed"
+                project.updated_at = datetime.utcnow()
+                db.commit()
+
+        return {
+            "status": "success" if build_success else "failed",
+            "imageId": image_id,
+            "logs": logs,
+        }
+
+    # -- Compose 操作 ----------------------------------------------------
+
+    @server.tool(description="启动项目容器（docker compose up -d --build）。")
+    def project_up(project_id: str) -> dict:
+        """启动项目容器（docker compose up -d --build）。
+
+        对项目目录执行 docker compose up -d --build，启动所有服务容器。
+        项目状态更新为 running。
+
+        参数:
+            project_id: 项目 ID
+
+        返回:
+            {
+                "status": "started",
+                "containerIds": ["容器 ID 列表"],
+                "message": "Containers started successfully"
+            }
+
+        异常:
+            RuntimeError: 项目不存在、正在构建中、compose 文件问题或启动失败
+        """
+        project_dir = _project_dir(project_id)
+        compose_file = project_dir / "docker-compose.yaml"
+
+        with get_db_session() as db:
+            project = (
+                db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+            )
+            if not project:
+                raise RuntimeError(f"未找到项目：{project_id}")
+            if project.status == "building":
+                raise RuntimeError("项目正在构建中")
+
+        if not compose_file.exists():
+            raise RuntimeError("docker-compose.yaml 不存在")
+        if not compose_file.read_text(encoding="utf-8").strip():
+            raise RuntimeError("docker-compose.yaml 为空")
+
+        compose_name = f"mp_{project_id}"
+
+        try:
+            result = subprocess.run(
+                [
+                    "docker",
+                    "compose",
+                    "-f",
+                    str(compose_file),
+                    "-p",
+                    compose_name,
+                    "up",
+                    "-d",
+                    "--build",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                cwd=str(project_dir),
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"启动失败: {result.stderr or result.stdout}")
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("启动超时（120s）")
+        except FileNotFoundError:
+            raise RuntimeError(
+                "未找到 docker compose 命令，请确保 Docker Compose 已安装"
+            )
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"启动失败: {e}")
+
+        # 获取容器 ID 列表
+        container_ids: list[str] = []
+        try:
+            client = get_docker_client_safe()
+            containers = client.containers.list(
+                all=True,
+                filters={"label": f"com.docker.compose.project={compose_name}"},
+            )
+            container_ids = [c.id for c in containers]
+            client.close()
+        except Exception:
+            pass
+
+        with get_db_session() as db:
+            project = (
+                db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+            )
+            if project:
+                project.status = "running"
+                project.updated_at = datetime.utcnow()
+                db.commit()
+
+        return {
+            "status": "started",
+            "containerIds": container_ids,
+            "message": "Containers started successfully",
+        }
+
+    @server.tool(description="停止项目容器（docker compose down）。")
+    def project_down(project_id: str) -> dict:
+        """停止项目容器（docker compose down）。
+
+        对项目目录执行 docker compose down，停止并移除所有服务容器。
+        项目状态更新为 idle。
+
+        参数:
+            project_id: 项目 ID
+
+        返回:
+            {"status": "stopped", "message": "Containers stopped successfully"}
+
+        异常:
+            RuntimeError: 项目不存在时抛出
+        """
+        with get_db_session() as db:
+            project = (
+                db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+            )
+            if not project:
+                raise RuntimeError(f"未找到项目：{project_id}")
+
+        compose_file = _project_dir(project_id) / "docker-compose.yaml"
+        compose_name = f"mp_{project_id}"
+
+        if compose_file.exists():
+            try:
+                subprocess.run(
+                    [
+                        "docker",
+                        "compose",
+                        "-f",
+                        str(compose_file),
+                        "-p",
+                        compose_name,
+                        "down",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    cwd=str(_project_dir(project_id)),
+                )
+            except Exception:
+                pass
+
+        with get_db_session() as db:
+            project = (
+                db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
+            )
+            if project:
+                project.status = "idle"
+                project.updated_at = datetime.utcnow()
+                db.commit()
+
+        return {
+            "status": "stopped",
+            "message": "Containers stopped successfully",
+        }
