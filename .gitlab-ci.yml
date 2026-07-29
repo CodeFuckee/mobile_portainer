@@ -115,10 +115,6 @@ build_images:
     - docker
   timeout: 60m
   script:
-    - echo "=== 0. Docker 环境诊断 ==="
-    - docker info 2>&1 | head -5 || echo "诊断：docker info 失败"
-    - docker system df 2>&1 || echo "诊断：docker system df 失败"
-    - df -h / 2>/dev/null || echo "诊断：df 失败"
     - echo "=== 1. 预拉取基础镜像 ==="
     - docker pull docker.1ms.run/python:3.11-slim || { echo "错误：python 镜像拉取失败"; exit 1; }
     - echo "--- python 镜像拉取完成 ---"
