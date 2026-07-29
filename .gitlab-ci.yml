@@ -115,12 +115,7 @@ build_images:
     - docker
   timeout: 60m
   script:
-    - echo "=== 1. 预拉取基础镜像 ==="
-    - docker pull docker.1ms.run/python:3.11-slim || { echo "错误：python 镜像拉取失败"; exit 1; }
-    - echo "--- python 镜像拉取完成 ---"
-    - docker pull docker.1ms.run/nginx:alpine || { echo "错误：nginx 镜像拉取失败"; exit 1; }
-    - echo "--- nginx 镜像拉取完成 ---"
-    - echo "=== 2. 构建 API 镜像 ==="
+    - echo "=== 构建 API 镜像 ==="
     - |
       docker build \
         --progress=plain \
@@ -128,9 +123,9 @@ build_images:
         --build-arg PIP_INDEX_URL=${PIP_INDEX_URL} \
         -t ${API_IMAGE_NAME}:${IMAGE_TAG} \
         -t ${API_IMAGE_NAME}:latest \
-        . || { echo "错误：API 镜像构建失败"; exit 1; }
+        . 2>&1 | tee /tmp/api_build.log
     - echo "--- API 镜像构建完成 ---"
-    - echo "=== 3. 构建 Web 镜像 ==="
+    - echo "=== 构建 Web 镜像 ==="
     - |
       docker build \
         --progress=plain \
@@ -138,9 +133,9 @@ build_images:
         --build-arg DOWNLOAD_BASE=${WEB_DOWNLOAD_BASE:-https://github.com} \
         -t ${WEB_IMAGE_NAME}:${IMAGE_TAG} \
         -t ${WEB_IMAGE_NAME}:latest \
-        . || { echo "错误：Web 镜像构建失败"; exit 1; }
+        . 2>&1 | tee /tmp/web_build.log
     - echo "--- Web 镜像构建完成 ---"
-    - echo "=== 4. 镜像列表 ==="
+    - echo "=== 镜像列表 ==="
     - docker images | grep mobile_portainer
   after_script:
     - |
