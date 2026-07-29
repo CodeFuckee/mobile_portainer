@@ -112,8 +112,6 @@ build_images:
   tags:
     - linux
     - docker
-  needs:
-    - job: pytest
   timeout: 60m
   script:
     - echo "=== 0. Docker 环境诊断 ==="
