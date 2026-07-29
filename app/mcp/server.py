@@ -78,15 +78,15 @@ HTTP 模式（API Key，不走 OAuth）：
 
 === 依赖说明 ===
 
-- FastMCP：MCP 协议的 Python 实现，提供 FastAPI 风格的装饰器 API
+- MCPServer：MCP 协议的 Python 实现，提供 FastAPI 风格的装饰器 API
 - docker-py：Docker Engine API 的 Python 客户端
-- tools.py 中的 register_all_tools：向 FastMCP 实例注册所有 Docker 管理工具
+- tools.py 中的 register_all_tools：向 MCPServer 实例注册所有 Docker 管理工具
 """
 
 import logging
 import os
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 
 from app.core.config import MCP_AUTH_ENABLED, PUBLIC_BASE_URL
@@ -100,7 +100,7 @@ from .tools import register_all_tools
 logger = logging.getLogger("mcp.portainer")
 logger.setLevel(logging.INFO)
 
-# ---- 创建 FastMCP 实例 ----
+# ---- 创建 MCPServer 实例 ----
 # 根据 MCP_AUTH_ENABLED 环境变量决定是否启用 OAuth 认证
 if MCP_AUTH_ENABLED:
     logger.info("MCP OAuth 认证已启用，issuer_url=%s/mcp", PUBLIC_BASE_URL)
@@ -110,7 +110,7 @@ if MCP_AUTH_ENABLED:
         api_key=os.environ.get("MOBILE_PORTAINER_API_KEY"),
     )
 
-    app = FastMCP(
+    app = MCPServer(
         "mobile-portainer",
         auth_server_provider=auth_provider,
         auth=AuthSettings(
@@ -128,7 +128,7 @@ if MCP_AUTH_ENABLED:
     )
 else:
     logger.info("MCP OAuth 认证已禁用")
-    app = FastMCP("mobile-portainer")
+    app = MCPServer("mobile-portainer")
 
 # ---- 注册所有 Docker 管理工具 ----
 # 将 tools.py 中定义的 24 个工具函数注册到 MCP Server

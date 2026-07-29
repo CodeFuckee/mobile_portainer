@@ -80,7 +80,7 @@ from datetime import datetime
 import docker
 import git
 import psutil
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 from app.core.config import PROJECTS_DIR
 from app.core.utils import (
@@ -101,18 +101,21 @@ except ImportError:
     GPUtil = None
 
 
-def register_all_tools(server: FastMCP) -> None:
+def register_all_tools(server: MCPServer) -> None:
     """向 MCP Server 注册所有 Docker 管理工具。
 
     本函数使用 @server.tool() 装饰器注册 24 个工具函数。
     每个工具通过 description 参数提供中文描述，
     AI 助手根据描述来决定何时调用哪个工具。
 
-    工具函数的类型注解（参数类型和返回类型）会被 FastMCP 自动
+    Args:
+        server: MCPServer 实例，工具会被注册到此实例上
+
+    工具函数的类型注解（参数类型和返回类型）会被 MCPServer 自动
     转换为 MCP 工具的 JSON Schema，供客户端进行参数验证。
 
     参数:
-        server: FastMCP 实例，工具会被注册到此实例上
+        server: MCPServer 实例，工具会被注册到此实例上
     """
 
     # ================================================================

@@ -55,14 +55,13 @@ from mcp.server.auth.routes import (
 from app.core.config import PUBLIC_BASE_URL
 from .server import app as _mcp_app
 
-# ---- 配置 MCP 端点路径 ----
-_mcp_app.settings.streamable_http_path = "/"
-
 # ---- 创建 Streamable HTTP ASGI 应用 ----
-mcp_http_app = _mcp_app.streamable_http_app()
+# mcp 2.0.0: streamable_http_path 通过参数直接传入 streamable_http_app()
+mcp_http_app = _mcp_app.streamable_http_app(streamable_http_path="/")
 
 # ---- 导出会话管理器 ----
-mcp_session_manager = _mcp_app._session_manager
+# mcp 2.0.0: session_manager 已从私有属性改为公开属性
+mcp_session_manager = _mcp_app.session_manager
 
 # ---- 创建根路径 OAuth 路由 ----
 # MCP 客户端按 RFC 8414 规范在服务根路径发现 OAuth 端点，

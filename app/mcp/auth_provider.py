@@ -163,7 +163,7 @@ class DatabaseOAuthProvider(OAuthAuthorizationServerProvider):
 
     === 使用方式 ===
 
-    在 FastMCP 实例上配置：
+    在 MCPServer 实例上配置：
 
         auth_provider = DatabaseOAuthProvider(
             session_factory=SessionLocal,

@@ -7,7 +7,7 @@ Mobile Portainer MCP Server 包。
 
 === 模块架构 ===
 
-server.py         — MCP Server 入口，基于 FastMCP，使用 stdio 传输
+server.py         — MCP Server 入口，基于 MCPServer，使用 stdio 传输
 http_server.py    — HTTP 传输层，将 MCP Server 导出为 ASGI 应用，可嵌入 FastAPI
 tools.py          — 工具定义，注册 24 个 Docker 管理工具到 MCP Server
 auth_provider.py  — OAuth 2.0 认证提供者，基于内存实现，与 API Key 系统集成
