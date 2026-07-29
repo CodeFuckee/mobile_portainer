@@ -19,6 +19,11 @@ variables:
   IMAGE_TAG: "${CI_COMMIT_SHORT_SHA}"
 
   # ================================================================
+  # 构建参数（国内镜像源，可在 GitLab UI 中覆盖）
+  # ================================================================
+  WEB_DOWNLOAD_BASE: "https://github.com"
+
+  # ================================================================
   # 部署变量 —— 可在 GitLab UI 中覆盖
   # ================================================================
   DEPLOY_API_CONTAINER_NAME: "mobile-portainer-api"
@@ -52,7 +57,6 @@ pytest:
     - linux
     - docker
   timeout: 20m
-  allow_failure: true
   cache:
     key: pip-cache-${CI_COMMIT_REF_SLUG}
     paths:
@@ -100,12 +104,6 @@ pytest:
 
 # ================================================================
 # build —— 构建 Docker 镜像
-#
-# 使用 DOCKER_BUILDKIT=0 强制使用传统构建器（而非 BuildKit），
-# 原因：BuildKit 在某些 NAS 环境（特别是使用 containerd 镜像
-# 存储时）无法看到 classic docker pull 预拉取的镜像，导致构建
-# 在解析基础镜像阶段挂起直到被 SIGKILL。传统构建器与 docker
-# pull 共享同一个镜像存储，可以正常使用预拉取的镜像。
 # ================================================================
 build_images:
   extends: .setup
@@ -113,17 +111,17 @@ build_images:
   tags:
     - linux
     - docker
+  needs:
+    - job: pytest
   timeout: 60m
   script:
     - echo "=== 预拉取基础镜像 ==="
     - docker pull docker.1ms.run/python:3.11-slim
-    - echo "--- pull done ---"
+    - docker pull docker.1ms.run/nginx:alpine
     - echo "=== 构建 API 镜像 ==="
     - docker build --progress=plain -f Dockerfile.cn --build-arg PIP_INDEX_URL=${PIP_INDEX_URL} -t ${API_IMAGE_NAME}:${IMAGE_TAG} -t ${API_IMAGE_NAME}:latest .
-    - echo "--- api build done ---"
     - echo "=== 构建 Web 镜像 ==="
     - docker build --progress=plain -f Dockerfile.web.cn --build-arg DOWNLOAD_BASE=${WEB_DOWNLOAD_BASE:-https://github.com} -t ${WEB_IMAGE_NAME}:${IMAGE_TAG} -t ${WEB_IMAGE_NAME}:latest .
-    - echo "--- web build done ---"
     - echo "=== 镜像列表 ==="
     - docker images | grep mobile_portainer
   after_script:
