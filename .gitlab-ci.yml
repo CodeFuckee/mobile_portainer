@@ -115,26 +115,15 @@ build_images:
     - docker
   timeout: 60m
   script:
+    - echo "=== 预拉取基础镜像 ==="
+    - docker pull docker.1ms.run/python:3.11-slim
+    - echo "--- pull done ---"
     - echo "=== 构建 API 镜像 ==="
-    - |
-      docker build \
-        --progress=plain \
-        -f Dockerfile.cn \
-        --build-arg PIP_INDEX_URL=${PIP_INDEX_URL} \
-        -t ${API_IMAGE_NAME}:${IMAGE_TAG} \
-        -t ${API_IMAGE_NAME}:latest \
-        . 2>&1 | tee /tmp/api_build.log
-    - echo "--- API 镜像构建完成 ---"
+    - docker build --progress=plain -f Dockerfile.cn --build-arg PIP_INDEX_URL=${PIP_INDEX_URL} -t ${API_IMAGE_NAME}:${IMAGE_TAG} -t ${API_IMAGE_NAME}:latest .
+    - echo "--- api build done ---"
     - echo "=== 构建 Web 镜像 ==="
-    - |
-      docker build \
-        --progress=plain \
-        -f Dockerfile.web.cn \
-        --build-arg DOWNLOAD_BASE=${WEB_DOWNLOAD_BASE:-https://github.com} \
-        -t ${WEB_IMAGE_NAME}:${IMAGE_TAG} \
-        -t ${WEB_IMAGE_NAME}:latest \
-        . 2>&1 | tee /tmp/web_build.log
-    - echo "--- Web 镜像构建完成 ---"
+    - docker build --progress=plain -f Dockerfile.web.cn --build-arg DOWNLOAD_BASE=${WEB_DOWNLOAD_BASE:-https://github.com} -t ${WEB_IMAGE_NAME}:${IMAGE_TAG} -t ${WEB_IMAGE_NAME}:latest .
+    - echo "--- web build done ---"
     - echo "=== 镜像列表 ==="
     - docker images | grep mobile_portainer
   after_script:
