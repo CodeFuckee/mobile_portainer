@@ -117,7 +117,6 @@ build_images:
   script:
     - echo "=== 预拉取基础镜像 ==="
     - docker pull docker.1ms.run/python:3.11-slim
-    - docker pull docker.1ms.run/nginx:alpine
     - echo "=== 构建 API 镜像 ==="
     - docker build --progress=plain -f Dockerfile.cn --build-arg PIP_INDEX_URL=${PIP_INDEX_URL} -t ${API_IMAGE_NAME}:${IMAGE_TAG} -t ${API_IMAGE_NAME}:latest .
     - echo "=== 构建 Web 镜像 ==="
